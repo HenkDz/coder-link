@@ -1,0 +1,49 @@
+{
+  "cli": {
+    "error_general": "错误: {error}"
+  },
+  "lang": {
+    "current": "当前语言: {lang}",
+    "changed": "语言已切换"
+  },
+  "auth": {
+    "set_success": "API密钥已设置",
+    "revoke_success": "API密钥已撤销",
+    "reload_success": "配置已重新加载到 {tool}",
+    "not_set": "未设置API密钥和套餐类型"
+  },
+  "tools": {
+    "list_header": "支持的编码工具:",
+    "install_success": "工具 {tool} 已安装",
+    "uninstall_success": "工具 {tool} 已卸载"
+  },
+  "mcp": {
+    "list_header": "可用的MCP服务:",
+    "installed_header": "已安装的MCP服务:",
+    "install_success": "MCP服务 {service} 已安装",
+    "uninstall_success": "MCP服务 {service} 已卸载"
+  },
+  "doctor": {
+    "header": "系统配置检查:",
+    "config_path": "配置文件路径: {path}",
+    "current_auth": "当前认证信息:",
+    "plan": "套餐类型",
+    "api_key": "API密钥",
+    "not_set": "未设置",
+    "tools_header": "工具状态:",
+    "mcp_header": "MCP服务:",
+    "none": "无"
+  },
+  "wizard": {
+    "welcome": "欢迎使用编码助手!",
+    "select_language": "请选择语言:",
+    "select_plan": "请选择您的编码计划/提供商:",
+    "enter_api_key": "请输入您的API密钥:",
+    "select_tools": "选择要管理的编码工具:",
+    "installing_tools": "正在安装工具...",
+    "tool_installed": "工具 {tool} 已安装",
+    "loading_plan": "正在加载配置到工具...",
+    "manage_mcp": "是否要管理MCP服务?",
+    "complete": "初始化完成!"
+  }
+}

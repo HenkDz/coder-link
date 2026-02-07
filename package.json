@@ -1,0 +1,67 @@
+{
+  "name": "coder-link",
+  "version": "0.0.8",
+  "description": "Coder Link: connect coding tools to any model/provider",
+  "main": "dist/index.js",
+  "bin": {
+    "coder-link": "dist/cli.js"
+  },
+  "homepage": "https://docs.z.ai/",
+  "bugs": {
+    "url": "https://docs.z.ai/"
+  },
+  "type": "module",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "zai-coding-plugins"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc && bun scripts/copy-locales.mjs",
+    "dev": "tsx watch src/cli.ts",
+    "start": "bun dist/cli.js",
+    "clean": "bun scripts/clean.mjs",
+    "prepublishOnly": "pnpm run clean && pnpm run build",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix"
+  },
+  "keywords": [
+    "cli",
+    "coding",
+    "helper",
+    "tools",
+    "kimi",
+    "glm"
+  ],
+  "author": "Z.AI",
+  "packageManager": "pnpm@10.15.0",
+  "dependencies": {
+    "@iarna/toml": "^2.2.5",
+    "chalk": "^5.3.0",
+    "commander": "^12.1.0",
+    "inquirer": "^9.2.12",
+    "js-yaml": "^4.1.0",
+    "ora": "^8.0.1",
+    "terminal-link": "^5.0.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@types/inquirer": "^9.0.7",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^24.10.1",
+    "eslint": "^9.39.1",
+    "globals": "^16.5.0",
+    "nodemon": "^3.1.11",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.46.4"
+  }
+}

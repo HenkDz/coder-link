@@ -1,0 +1,49 @@
+{
+  "cli": {
+    "error_general": "Error: {error}"
+  },
+  "lang": {
+    "current": "Current language: {lang}",
+    "changed": "Language changed"
+  },
+  "auth": {
+    "set_success": "API key set successfully",
+    "revoke_success": "API key revoked",
+    "reload_success": "Configuration reloaded into {tool}",
+    "not_set": "API key and plan not set"
+  },
+  "tools": {
+    "list_header": "Supported coding tools:",
+    "install_success": "Tool {tool} installed",
+    "uninstall_success": "Tool {tool} uninstalled"
+  },
+  "mcp": {
+    "list_header": "Available MCP services:",
+    "installed_header": "Installed MCP services:",
+    "install_success": "MCP service {service} installed",
+    "uninstall_success": "MCP service {service} uninstalled"
+  },
+  "doctor": {
+    "header": "System Configuration Check:",
+    "config_path": "Config path: {path}",
+    "current_auth": "Current authentication:",
+    "plan": "Plan",
+    "api_key": "API Key",
+    "not_set": "Not set",
+    "tools_header": "Tool status:",
+    "mcp_header": "MCP services:",
+    "none": "None"
+  },
+  "wizard": {
+    "welcome": "Welcome to Coding Helper!",
+    "select_language": "Please select language:",
+    "select_plan": "Please select your coding plan/provider:",
+    "enter_api_key": "Please enter your API key:",
+    "select_tools": "Select coding tools to manage:",
+    "installing_tools": "Installing tools...",
+    "tool_installed": "Tool {tool} installed",
+    "loading_plan": "Loading configuration into tools...",
+    "manage_mcp": "Would you like to manage MCP services?",
+    "complete": "Initialization complete!"
+  }
+}

@@ -1,0 +1,11 @@
+export { configManager } from './utils/config.js';
+export { i18n, setLang, t } from './utils/i18n.js';
+export { logger } from './utils/logger.js';
+export { toolManager } from './lib/tool-manager.js';
+export { kimiManager } from './lib/kimi-manager.js';
+export { ampManager } from './lib/amp-manager.js';
+export { piManager } from './lib/pi-manager.js';
+export { claudeCodeManager } from './lib/claude-code-manager.js';
+export { openCodeManager } from './lib/opencode-manager.js';
+export { crushManager } from './lib/crush-manager.js';
+export { factoryDroidManager } from './lib/factory-droid-manager.js';
