@@ -4,13 +4,24 @@ A CLI that links coding tools to models from multiple providers.
 
 ## Features
 
-- **Multi-Provider Support**: GLM Coding Plan (Global/China), Kimi 2.5, OpenRouter, and NVIDIA
+- **Multi-Provider Support**: GLM Coding Plan (Global/China), Kimi 2.5, OpenRouter, NVIDIA, and LM Studio (local)
 - **Interactive Wizard**: Friendly onboarding guidance on first launch
 - **Tool Management**: Automatically configures CLI tools with your API credentials
 - **MCP Configuration**: Easily manage Model Context Protocol services
 - **Local Storage**: All settings stored securely on your machine
 - **Internationalization**: Chinese and English bilingual interface
 - **Status & Health Check**: View current configuration and diagnose issues quickly
+
+## Screenshots
+
+### Main Menu
+![Main Menu](screenshots/main.png)
+
+### Provider Configuration
+![Provider Configuration](screenshots/provider-config.png)
+
+### Coding Tools
+![Coding Tools](screenshots/coding-tools.png)
 
 ## Supported Coding Tools
 
