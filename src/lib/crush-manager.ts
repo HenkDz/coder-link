@@ -51,8 +51,12 @@ export class CrushManager {
   }
 
   private getBaseUrl(plan: string, options?: ProviderOptions): string {
-    if (plan === 'kimi') {
-      return options?.baseUrl?.trim() || 'https://api.moonshot.ai/v1';
+    if (options?.baseUrl?.trim()) {
+      return options.baseUrl.trim();
+    }
+    // All kimi-like providers use the same default base URL
+    if (plan === 'kimi' || plan === 'openrouter' || plan === 'nvidia') {
+      return 'https://api.moonshot.ai/v1';
     }
     return plan === 'glm_coding_plan_global'
       ? 'https://api.z.ai/api/coding/paas/v4'
@@ -63,13 +67,18 @@ export class CrushManager {
     const currentConfig = this.getConfig();
     const baseUrl = this.getBaseUrl(plan, options);
 
+    // Determine provider name for display
+    const providerDisplayName = (plan === 'kimi' || plan === 'openrouter' || plan === 'nvidia')
+      ? 'Kimi Provider'
+      : 'ZAI Provider';
+
     const newConfig = {
       ...currentConfig,
       providers: {
         ...(currentConfig.providers || {}),
         zai: {
           id: 'zai',
-          name: plan === 'kimi' ? 'Kimi Provider' : 'ZAI Provider',
+          name: providerDisplayName,
           base_url: baseUrl,
           api_key: apiKey
         }

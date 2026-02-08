@@ -11,21 +11,54 @@ import { toolManager } from './lib/tool-manager.js';
 import { logger } from './utils/logger.js';
 import { BUILTIN_MCP_SERVICES } from './mcp-services.js';
 import { commandExists, runInteractive, runInteractiveWithEnv, runInNewTerminal } from './utils/exec.js';
-import { testOpenAIChatCompletionsApi, testOpenAICompatibleApi } from './utils/api-test.js';
-import { 
-  printSplash, 
-  printHeader, 
-  printStatusBar, 
-  printNavigationHints,
-  printConfigPathHint,
-  planLabel, 
-  planLabelColored, 
-  maskApiKey, 
-  toolLabel, 
-  statusIndicator,
-  truncateForTerminal,
-} from './utils/brand.js';
+import { testOpenAIChatCompletionsApi, testOpenAICompatibleApi, fetchOpenRouterModelInfo } from './utils/api-test.js';
+import { printSplash, printHeader, printStatusBar, printNavigationHints, printConfigPathHint, planLabel, planLabelColored, maskApiKey, toolLabel, statusIndicator, truncateForTerminal, } from './utils/brand.js';
 import { printError, printSuccess, printWarning, printInfo } from './utils/output.js';
+
+function disableMouseTracking(): void {
+  if (!process.stdout.isTTY) return;
+  // Disable common mouse tracking modes.
+  // See xterm mouse tracking: 9, 1000, 1002, 1003, 1005, 1006, 1015.
+  process.stdout.write(
+    '\x1b[?9l' +
+      '\x1b[?1000l' +
+      '\x1b[?1002l' +
+      '\x1b[?1003l' +
+      '\x1b[?1005l' +
+      '\x1b[?1006l' +
+      '\x1b[?1015l'
+  );
+}
+
+/**
+ * Some UI libs can enable terminal mouse tracking via ANSI (DECSET).
+ * When enabled, mouse movement/clicks become input and can:
+ * - move list selection
+ * - inject junk like "35;47;...M" into text inputs
+ *
+ * We prevent this by stripping *mouse-enable* escape sequences from stdout
+ * so mouse mode never turns on, while leaving stdin untouched (arrow keys work).
+ */
+function installStdoutMouseGuard(): void {
+  if (!process.stdout.isTTY) return;
+  const originalWrite = process.stdout.write.bind(process.stdout);
+  const enableRe = /\x1b\[\?(?:9|1000|1002|1003|1005|1006|1015)h/g;
+  (process.stdout as any).write = (chunk: any, encoding?: any, cb?: any) => {
+    if (chunk == null) return originalWrite(chunk as any, encoding as any, cb as any);
+    if (Buffer.isBuffer(chunk) || chunk instanceof Uint8Array) {
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      const s = buf.toString('latin1');
+      const cleaned = s.replace(enableRe, '');
+      return originalWrite(Buffer.from(cleaned, 'latin1'), encoding as any, cb as any);
+    }
+    const s = String(chunk);
+    const cleaned = s.replace(enableRe, '');
+    return originalWrite(cleaned as any, encoding as any, cb as any);
+  };
+}
+
+installStdoutMouseGuard();
+disableMouseTracking();
 
 // ── Helpers ────────────────────────────────────────────────────────────
 function providerSummary(plan: Plan | undefined): string {
@@ -93,9 +126,7 @@ async function pause(message = 'Press Enter to continue... (or q to quit)'): Pro
     // Inquirer/readline can leave stdin paused after a prompt.
     // If stdin is paused, a pending `once('data')` listener does not keep the
     // event loop alive and the process may exit immediately.
-    if (process.stdin.isTTY) {
-      process.stdin.resume();
-    }
+    if (process.stdin.isTTY) process.stdin.resume();
 
     const onData = (data: Buffer | string) => {
       cleanup();
@@ -135,6 +166,21 @@ function createSafeSpinner(text: string): Ora {
   return ora({ text: safeText, spinner: 'dots' });
 }
 
+// ── Tool/Provider Compatibility ────────────────────────────────────────
+/**
+ * Check if a provider is compatible with a tool.
+ * Returns null if compatible, or an error message if incompatible.
+ */
+function getProviderIncompatibility(tool: string, plan: Plan): string | null {
+  // Claude Code requires Anthropic-compatible API (/v1/messages)
+  // Kimi and NVIDIA only provide OpenAI-compatible API (/v1/chat/completions)
+  // LM Studio supports both OpenAI and Anthropic endpoints
+  if (tool === 'claude-code' && (plan === 'kimi' || plan === 'nvidia')) {
+    return 'Requires Anthropic API';
+  }
+  return null;
+}
+
 // ── Provider Menu ──────────────────────────────────────────────────────
 const PROVIDER_CHOICES: Array<{ name: string; value: Plan }> = [
   { name: 'GLM Coding Plan (Global)', value: 'glm_coding_plan_global' },
@@ -142,100 +188,192 @@ const PROVIDER_CHOICES: Array<{ name: string; value: Plan }> = [
   { name: 'Kimi (Moonshot)', value: 'kimi' },
   { name: 'OpenRouter', value: 'openrouter' },
   { name: 'NVIDIA NIM', value: 'nvidia' },
+  { name: 'LM Studio (Local)', value: 'lmstudio' },
 ];
+
+const COMMON_MODELS: Record<string, string[]> = {
+  kimi: ['moonshot-ai/kimi-k2.5', 'moonshot-ai/kimi-k2-thinking'],
+  openrouter: ['moonshotai/kimi-k2.5', 'anthropic/claude-opus-4.6','poney-alpha', 'qwen/qwen3-coder-next'],
+  nvidia: ['moonshotai/kimi-k2.5', 'deepseek-ai/deepseek-v3.2', 'meta/llama-3.3-70b-instruct', 'meta/llama-4-maverick-17b-128e-instruct', 'qwen/qwen3-coder-480b-a35b-instruct', 'z-ai/glm4.7', 'nvidia/llama-3.3-nemotron-super-49b-v1.5'],
+  lmstudio: ['lmstudio-community', 'deepseek-coder-v3', 'codellama/13b', 'mistral-7b-instruct', 'qwen2.5-coder-7b'],
+  glm_coding_plan_global: ['glm-4.7', 'glm-4-coder', 'glm-4-plus', 'glm-4-air', 'glm-4-flash'],
+  glm_coding_plan_china: ['glm-4.7', 'glm-4-coder', 'glm-4-plus', 'glm-4-air', 'glm-4-flash'],
+};
+
+/**
+ * Enhanced prompt for model selection.
+ * Offers common models + custom input + back.
+ */
+async function selectModelId(plan: Plan, currentModel?: string): Promise<string | '__back'> {
+  const common = COMMON_MODELS[plan] || [];
+  const choices = [
+    ...(currentModel ? [{ name: `${currentModel} ${chalk.green('(current)')}`, value: currentModel }] : []),
+    ...common.filter(m => m !== currentModel).map(m => ({ name: m, value: m })),
+    { name: '✍️  Enter custom model ID...', value: '__custom' },
+    new inquirer.Separator(),
+    { name: chalk.gray('← Back'), value: '__back' },
+  ];
+
+  const { selection } = await inquirer.prompt<{ selection: string }>([{
+    type: 'list',
+    name: 'selection',
+    message: 'Select Model ID:',
+    choices,
+  }]);
+
+  if (selection === '__back') return '__back';
+  if (selection === '__custom') {
+    const { custom } = await inquirer.prompt<{ custom: string }>([{
+      type: 'input',
+      name: 'custom',
+      message: `Enter model ID (or 'b' to go back):`,
+      validate: (v: string) => v.trim().length > 0 || 'Model ID cannot be empty',
+    }]);
+    if (custom.trim().toLowerCase() === 'b') return selectModelId(plan, currentModel);
+    return custom.trim();
+  }
+  return selection;
+}
+
+async function configureProfilesMenu(): Promise<void> {
+  while (true) {
+    console.clear();
+    printHeader('Configure Profiles');
+    printNavigationHints();
+
+    const { plan } = await inquirer.prompt<{ plan: Plan | '__back' }>([{
+      type: 'list',
+      name: 'plan',
+      message: 'Select profile to configure:',
+      choices: [
+        ...PROVIDER_CHOICES.map(c => {
+          const key = configManager.getApiKeyFor(c.value);
+          const status = key ? chalk.green(' (Configured)') : chalk.gray(' (Not set)');
+          return { name: `${c.name}${status}`, value: c.value };
+        }),
+        new inquirer.Separator(),
+        { name: chalk.gray('← Back'), value: '__back' as any },
+      ],
+    }]);
+
+    if (plan === '__back') return;
+
+    await providerSetupFlow(plan);
+    console.log();
+    await pause();
+  }
+}
 
 /**
  * Unified provider configuration flow:
- * 1. Select provider
- * 2. Set endpoint + model (for kimi-like providers)
- * 3. Set API key
- * All in one guided sequence — no separate "Set API key" action.
+ * 1. Set endpoint + model (for kimi-like providers)
+ * 2. Set API key
  */
-async function providerSetupFlow(currentPlan?: Plan): Promise<void> {
-  // Step 1 — Select provider
-  const { plan } = await inquirer.prompt<{ plan: Plan | '__back' }>([{
-    type: 'list',
-    name: 'plan',
-    message: 'Select provider:',
-    choices: [
-      ...PROVIDER_CHOICES.map(c => ({
-        ...c,
-        name: c.value === currentPlan ? `${c.name} ${chalk.green('●')}` : c.name,
-      })),
-      new inquirer.Separator(),
-      { name: chalk.gray('← Back'), value: '__back' as any },
-    ],
-    default: currentPlan,
+async function providerSetupFlow(plan: Plan): Promise<void> {
+  printInfo(`Configuring ${planLabel(plan)} profile...`);
+  console.log(chalk.gray(`  (Enter 'b' at any text prompt to go back)\n`));
+
+  // Step 1 — Endpoint
+  const current = configManager.getProviderSettings(plan);
+  const { base_url } = await inquirer.prompt<{ base_url: string }>([{
+    type: 'input',
+    name: 'base_url',
+    message: `${planLabel(plan)} Base URL:`,
+    default: current.baseUrl,
+    validate: (v: string) => v.trim().length > 0 || 'Base URL cannot be empty',
   }]);
 
-  if (plan === '__back') return;
-
-  // Step 2 — Endpoint + Model (kimi-like only)
-  if (isKimiLikePlan(plan)) {
-    const current = configManager.getProviderSettings(plan);
-    const { base_url } = await inquirer.prompt<{ base_url: string }>([{
-      type: 'input',
-      name: 'base_url',
-      message: `${planLabel(plan)} Base URL:`,
-      default: current.baseUrl,
-      validate: (v: string) => v.trim().length > 0 || 'Base URL cannot be empty',
-    }]);
-
-    const { model } = await inquirer.prompt<{ model: string }>([{
-      type: 'input',
-      name: 'model',
-      message: 'Default model ID:',
-      default: current.model || '',
-      validate: (v: string) => v.trim().length > 0 || 'Model ID cannot be empty',
-    }]);
-
-    const defaultCtx = current.maxContextSize || (plan === 'nvidia' ? 4096 : plan === 'openrouter' ? 16384 : 262144);
-    const { max_context_size } = await inquirer.prompt<{ max_context_size: number }>([{
-      type: 'input',
-      name: 'max_context_size',
-      message: 'Max context size:',
-      default: defaultCtx,
-      validate: (v: string) => {
-        const n = Number(v);
-        return Number.isInteger(n) && n > 0 || 'Enter a positive integer';
-      },
-      filter: (v: string) => Number(v),
-    }]);
-
-    configManager.setProviderProfile(plan, {
-      base_url: base_url.trim(),
-      model: model.trim(),
-      max_context_size: max_context_size,
-    });
+  if (base_url.trim().toLowerCase() === 'b') {
+     printInfo('Configuration cancelled');
+     return;
   }
+
+  // Step 2 — Model
+  const model = await selectModelId(plan, current.model);
+  if (model === '__back') return providerSetupFlow(plan);
+
+  // Try to fetch context size from OpenRouter API if applicable
+  let suggestedCtx = current.maxContextSize || (plan === 'nvidia' ? 4096 : plan === 'openrouter' ? 16384 : plan.includes('glm') ? 128000 : 262144);
+  let fetchedContextInfo = '';
+  
+  if (plan === 'openrouter') {
+    // We need an API key to fetch model info - check if one exists already
+    const existingKey = configManager.getApiKeyFor(plan);
+    if (existingKey) {
+      const spinner = createSafeSpinner(`Fetching model info from OpenRouter...`).start();
+      try {
+        const modelInfo = await fetchOpenRouterModelInfo({
+          apiKey: existingKey,
+          modelId: model.trim(),
+          timeoutMs: 8000,
+        });
+        if (modelInfo?.contextLength) {
+          suggestedCtx = modelInfo.contextLength;
+          fetchedContextInfo = chalk.green(` (fetched from API: ${modelInfo.contextLength.toLocaleString()})`);
+          spinner.succeed(`Found model: ${modelInfo.name || modelInfo.id} (context: ${modelInfo.contextLength.toLocaleString()})`);
+        } else {
+          spinner.fail('Could not fetch context size from OpenRouter, using default');
+        }
+      } catch {
+        spinner.fail('Failed to fetch model info from OpenRouter');
+      }
+    }
+  }
+
+  const { max_context_size_input } = await inquirer.prompt<{ max_context_size_input: string }>([{
+    type: 'input',
+    name: 'max_context_size_input',
+    message: `Max context size:${fetchedContextInfo} (or 'b')`,
+    default: String(suggestedCtx),
+    validate: (v: string) => {
+      if (v.trim().toLowerCase() === 'b') return true;
+      const n = Number(v);
+      return Number.isInteger(n) && n > 0 || 'Enter a positive integer';
+    },
+  }]);
+
+  if (max_context_size_input.toLowerCase() === 'b') return providerSetupFlow(plan);
+
+  configManager.setProviderProfile(plan, {
+    base_url: base_url.trim(),
+    model: model.trim(),
+    max_context_size: Number(max_context_size_input),
+  });
 
   // Step 3 — API key
   const existingKey = configManager.getApiKeyFor(plan);
-  const keyMsg = existingKey ? `API key for ${planLabel(plan)} [current: ${maskApiKey(existingKey)}]:` : `API key for ${planLabel(plan)}:`;
+  const isLocalProvider = plan === 'lmstudio';
+  const keyMsg = existingKey
+    ? `API key for ${planLabel(plan)} [current: ${maskApiKey(existingKey)}] (or 'b')${isLocalProvider ? ' [optional for local]' : ''}:`
+    : `API key for ${planLabel(plan)} (or 'b')${isLocalProvider ? ' [optional for local]' : ''}:`;
+
   const { apiKey } = await inquirer.prompt<{ apiKey: string }>([{
     type: 'password',
     name: 'apiKey',
     message: keyMsg,
     mask: '*',
     validate: (v: string) => {
+      if (v.trim().toLowerCase() === 'b') return true;
       // Allow empty to keep existing key
       if (existingKey && v.trim().length === 0) return true;
+      // Allow empty for local providers
+      if (isLocalProvider && v.trim().length === 0) return true;
       return v.trim().length > 0 || 'API key cannot be empty';
     },
   }]);
 
-  const finalKey = apiKey.trim() || (existingKey ?? '');
-  configManager.setAuth(plan, finalKey);
+  if (apiKey.trim().toLowerCase() === 'b') return providerSetupFlow(plan);
 
-  printSuccess(`Provider set to ${planLabel(plan)}`);
-  if (isKimiLikePlan(plan)) {
-    const s = configManager.getProviderSettings(plan);
-    console.log(chalk.gray(`  Endpoint : ${s.baseUrl}`));
-    console.log(chalk.gray(`  Model    : ${s.model}`));
-  }
+  const finalKey = apiKey.trim() || (existingKey ?? (isLocalProvider ? 'lmstudio' : ''));
+  configManager.setApiKeyFor(plan, finalKey);
+
+  printSuccess(`${planLabel(plan)} profile updated`);
+  const s = configManager.getProviderSettings(plan);
+  console.log(chalk.gray(`  Endpoint : ${s.baseUrl}`));
+  console.log(chalk.gray(`  Model    : ${s.model}`));
   console.log(chalk.gray(`  API Key  : ${maskApiKey(finalKey)}`));
-  console.log();
 }
+
 
 async function providerMenu(): Promise<void> {
   while (true) {
@@ -247,14 +385,15 @@ async function providerMenu(): Promise<void> {
     printConfigPathHint(configManager.configPath);
     printNavigationHints();
 
-    type Action = 'setup' | 'test' | 'revoke' | 'back';
+    type Action = 'set_global' | 'configure' | 'test' | 'revoke' | 'back';
     const choices: Array<{ name: string; value: Action }> = [
-      { name: '⚡ Configure Provider (select, endpoint, API key)', value: 'setup' },
+      { name: '🌐 Select Global Default Provider', value: 'set_global' },
+      { name: '⚙️  Configure Provider Profiles (keys, endpoints, models)', value: 'configure' },
     ];
 
     if (plan && auth.apiKey) {
       choices.push({ name: '🔬 Test API Connection', value: 'test' });
-      choices.push({ name: '🗑 Revoke API Key', value: 'revoke' });
+      choices.push({ name: '🗑  Revoke API Keys', value: 'revoke' });
     }
 
     const { action } = await inquirer.prompt<{ action: Action | '__back' }>([{
@@ -271,9 +410,29 @@ async function providerMenu(): Promise<void> {
     if (action === '__back') return;
 
     try {
-      if (action === 'setup') {
-        await providerSetupFlow(plan);
-        await pause();
+      if (action === 'set_global') {
+        const { newPlan } = await inquirer.prompt<{ newPlan: Plan | '__back' }>([{
+          type: 'list',
+          name: 'newPlan',
+          message: 'Select Global Default Provider:',
+          choices: [
+            ...PROVIDER_CHOICES.map(c => ({
+              ...c,
+              name: c.value === plan ? `${c.name} ${chalk.green('●')}` : c.name,
+            })),
+            new inquirer.Separator(),
+            { name: chalk.gray('← Back'), value: '__back' as any },
+          ],
+          default: plan,
+        }]);
+        if (newPlan !== '__back') {
+          const key = configManager.getApiKeyFor(newPlan);
+          configManager.setAuth(newPlan, key || '');
+          printSuccess(`Global provider set to ${planLabel(newPlan)}`);
+          await pause();
+        }
+      } else if (action === 'configure') {
+        await configureProfilesMenu();
       } else if (action === 'revoke') {
         const { confirm } = await inquirer.prompt<{ confirm: boolean }>([{
           type: 'confirm',
@@ -492,8 +651,8 @@ async function toolMenu(tool: string): Promise<void> {
 
     // Sync state
     const hasProvider = !!(chelperPlan && chelperKey);
-    const isInSync = hasProvider && (toolPlan ?? '') === chelperPlan && (toolKey ?? '') === chelperKey;
     const isConfigured = !!(toolPlan && toolKey);
+    const matchesGlobal = hasProvider && isConfigured && (toolPlan ?? '') === chelperPlan;
 
     // Status display
     console.log(chalk.gray('  Coder Link'));
@@ -507,12 +666,16 @@ async function toolMenu(tool: string): Promise<void> {
       console.log();
     }
 
-    // Sync indicator
-    if (hasProvider && !isInSync) {
-      printWarning('Tool config is out of sync — refresh recommended', 'Select "Refresh Configuration" to sync');
+    // Status indicator - show if configured, not sync state
+    if (isConfigured) {
+      if (matchesGlobal) {
+        printSuccess(`Using global default provider`);
+      } else {
+        printInfo(`Using tool-specific provider (different from global)`);
+      }
       console.log();
-    } else if (isInSync) {
-      printSuccess('Config in sync');
+    } else if (hasProvider) {
+      printInfo('Not configured — sync with global or select a provider');
       console.log();
     }
 
@@ -522,21 +685,42 @@ async function toolMenu(tool: string): Promise<void> {
     printNavigationHints();
 
     // Build dynamic choices
-    type ToolAction = 'refresh' | 'unload' | 'mcp' | 'start' | 'start_new' | 'start_same' | '__back';
+    type ToolAction = 'switch_profile' | 'sync_global' | 'change_model' | 'unload' | 'mcp' | 'start' | 'start_new' | 'start_same' | '__back';
     const choices: Array<{ name: string; value: ToolAction } | inquirer.Separator> = [];
 
-    if (hasProvider && !isInSync) {
-      choices.push({ name: '🔄 Refresh Configuration (push coder-link → tool)', value: 'refresh' });
-    } else if (hasProvider && isInSync) {
-      choices.push({ name: chalk.gray('🔄 Refresh Configuration (already in sync)'), value: 'refresh' });
-    } else {
-      choices.push({ name: chalk.yellow('🔄 Refresh Configuration (set provider first)'), value: 'refresh' });
+    choices.push({ name: '🔌 Connect to Provider (Switch Profile)', value: 'switch_profile' });
+
+    if (hasProvider) {
+      const globalIncompat = getProviderIncompatibility(tool, chelperPlan as Plan);
+      
+      if (globalIncompat) {
+        // Global provider is incompatible with this tool
+        choices.push({ 
+          name: chalk.gray(`🌐 Use Global Default (${planLabel(chelperPlan as Plan)}) ${chalk.red(`— ${globalIncompat}`)}`), 
+          value: 'sync_global' 
+        });
+      } else if (matchesGlobal) {
+        choices.push({ 
+          name: chalk.gray(`🌐 Sync with Global (already using ${planLabel(chelperPlan as Plan)})`), 
+          value: 'sync_global' 
+        });
+      } else {
+        choices.push({ 
+          name: `🌐 Use Global Default (${planLabel(chelperPlan as Plan)})`, 
+          value: 'sync_global' 
+        });
+      }
+    }
+
+    if (isConfigured && toolPlan) {
+      choices.push({ name: '🧪 Change Model ID (Override)', value: 'change_model' });
     }
 
     if (isConfigured) {
-      choices.push({ name: '🗑 Unload Configuration (remove from tool)', value: 'unload' });
+      choices.push({ name: '🗑  Unload Configuration (remove from tool)', value: 'unload' });
     }
 
+    choices.push(new inquirer.Separator());
     choices.push({ name: '🔌 MCP Servers', value: 'mcp' });
 
     // Start
@@ -577,22 +761,96 @@ async function toolMenu(tool: string): Promise<void> {
     if (action === '__back') return;
 
     try {
-      if (action === 'refresh') {
+      if (action === 'switch_profile') {
+        const { selectedPlan } = await inquirer.prompt<{ selectedPlan: Plan | '__back' }>([{
+          type: 'list',
+          name: 'selectedPlan',
+          message: `Select provider for ${toolLabel(tool)}:`,
+          choices: [
+            ...PROVIDER_CHOICES.map(c => {
+              const key = configManager.getApiKeyFor(c.value);
+              const status = key ? chalk.green(' ●') : chalk.gray(' (not configured)');
+              const incompat = getProviderIncompatibility(tool, c.value);
+              
+              if (incompat) {
+                // Show incompatible providers as disabled
+                return new inquirer.Separator(`  ${chalk.gray.strikethrough(c.name)} ${chalk.red(`(${incompat})`)}`);
+              }
+              return { name: `${c.name}${status}`, value: c.value };
+            }),
+            new inquirer.Separator(),
+            { name: chalk.gray('← Back'), value: '__back' as any },
+          ],
+        }]);
+
+        if (selectedPlan === '__back') continue;
+        
+        let key = configManager.getApiKeyFor(selectedPlan);
+        if (!key) {
+          const { setupNow } = await inquirer.prompt<{ setupNow: boolean }>([{
+            type: 'confirm',
+            name: 'setupNow',
+            message: `No credentials for ${planLabel(selectedPlan)}. Configure now?`,
+            default: true,
+          }]);
+          if (!setupNow) continue;
+          await providerSetupFlow(selectedPlan);
+          key = configManager.getApiKeyFor(selectedPlan);
+          if (!key) continue;
+        }
+
+        // After selecting provider, offer to select model for this tool
+        printInfo(`Select model for ${toolLabel(tool)} (current profile default: ${configManager.getProviderSettings(selectedPlan).model}):`);
+        const model = await selectModelId(selectedPlan, configManager.getProviderSettings(selectedPlan).model);
+        if (model === '__back') continue;
+
+        const spinner = createSafeSpinner(`Applying ${planLabel(selectedPlan)} to ${toolLabel(tool)}...`).start();
+        try {
+          await toolManager.loadConfig(tool, selectedPlan, key, { model });
+          spinner.succeed(`Connected ${toolLabel(tool)} to ${planLabel(selectedPlan)} (${model})`);
+        } catch (err) {
+          spinner.fail('Failed to apply configuration');
+          throw err;
+        }
+        await pause();
+      } else if (action === 'sync_global') {
         if (!hasProvider) {
-          printWarning('Configure a provider first from the main menu.', 'Run "coder-link init" and select "Provider & API Key"');
+          printWarning('Configure a global provider first from the main menu.');
           await pause();
           continue;
         }
-        const spinner = createSafeSpinner('Refreshing configuration...').start();
+        const spinner = createSafeSpinner(`Applying ${planLabel(chelperPlan!)} to ${toolLabel(tool)}...`).start();
         try {
           await toolManager.loadConfig(tool, chelperPlan!, chelperKey!);
-          spinner.succeed('Configuration refreshed');
+          spinner.succeed(`Now using ${planLabel(chelperPlan!)}`);
         } catch (err) {
-          spinner.fail('Failed to refresh configuration');
+          spinner.fail('Failed to apply configuration');
+          throw err;
+        }
+        await pause();
+      } else if (action === 'change_model') {
+        if (!toolPlan) continue;
+        const key = toolKey || configManager.getApiKeyFor(toolPlan as Plan);
+        if (!key) {
+          printWarning('Provider exists but no API key found. Configure it first.');
+          await pause();
+          continue;
+        }
+
+        const newModel = await selectModelId(toolPlan as Plan, toolModel || configManager.getProviderSettings(toolPlan as Plan).model);
+        if (newModel === '__back') continue;
+
+        const spinner = createSafeSpinner(`Updating model to ${newModel}...`).start();
+        try {
+          await toolManager.loadConfig(tool, toolPlan, key, { model: newModel });
+          spinner.succeed('Model updated');
+        } catch (err) {
+          spinner.fail('Failed to update model');
           throw err;
         }
         await pause();
       } else if (action === 'unload') {
+
         const { confirm } = await inquirer.prompt<{ confirm: boolean }>([{
           type: 'confirm',
           name: 'confirm',
@@ -657,38 +915,40 @@ async function launchTool(tool: string, mode?: 'same' | 'new'): Promise<void> {
     // ignore
   }
 
-  const isInSync = hasProvider && (toolPlan ?? '') === chelperPlan && (toolKey ?? '') === chelperKey;
   const isConfigured = !!(toolPlan && toolKey);
 
-  // Warn if out of sync
-  if (hasProvider && !isInSync) {
+  // Only prompt if tool is NOT configured but we have a global provider to offer
+  if (!isConfigured && hasProvider) {
     console.log();
-    printWarning('Configuration is out of sync!');
-    console.log(chalk.gray(`  Coder Link: ${chelperPlan || 'Not set'}${chelperModel ? ` (${chelperModel})` : ''}`));
-    console.log(chalk.gray(`  ${toolLabel(tool)}: ${toolPlan || 'Not configured'}${toolModel ? ` (${toolModel})` : ''}`));
+    printInfo(`${toolLabel(tool)} is not configured.`);
+    console.log(chalk.gray(`  Global default: ${chelperPlan}${chelperModel ? ` (${chelperModel})` : ''}`));
     console.log();
 
-    const { action } = await inquirer.prompt<{ action: 'launch' | 'refresh' | 'cancel' }>([{
+    const { action } = await inquirer.prompt<{ action: 'sync' | 'select' | 'cancel' }>([{
       type: 'list',
       name: 'action',
       message: 'What would you like to do?',
       choices: [
-        { name: '🔄 Refresh config, then launch', value: 'refresh' },
-        { name: '🚀 Launch anyway (current tool config)', value: 'launch' },
+        { name: `🔄 Configure with ${planLabel(chelperPlan!)} (global default)`, value: 'sync' },
+        { name: '📋 Select a different provider...', value: 'select' },
         { name: chalk.gray('← Cancel'), value: 'cancel' },
       ],
     }]);
 
     if (action === 'cancel') return;
-    if (action === 'refresh') {
-      const spinner = createSafeSpinner('Refreshing configuration...').start();
-      try {
-        await toolManager.loadConfig(tool, chelperPlan!, chelperKey!);
-        spinner.succeed('Configuration refreshed');
-      } catch (err) {
-        spinner.fail('Failed to refresh configuration');
-        throw err;
-      }
+    if (action === 'select') {
+      // Fall through to tool menu for provider selection - just return and let user configure
+      printInfo('Use the tool menu to configure a provider first.');
+      return;
+    }
+    // action === 'sync'
+    const spinner = createSafeSpinner(`Configuring with ${planLabel(chelperPlan!)}...`).start();
+    try {
+      await toolManager.loadConfig(tool, chelperPlan!, chelperKey!);
+      spinner.succeed('Configuration applied');
+    } catch (err) {
+      spinner.fail('Failed to apply configuration');
+      throw err;
     }
   }
 

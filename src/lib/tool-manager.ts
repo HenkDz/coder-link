@@ -87,24 +87,21 @@ export class ToolManager {
     return !!(plan && apiKey);
   }
 
-  async loadConfig(tool: string, plan: string, apiKey: string): Promise<void> {
+  async loadConfig(tool: string, plan: string, apiKey: string, overrides?: Partial<ProviderOptions>): Promise<void> {
     const manager = await this.getManager(tool);
-    if (plan === 'kimi' || plan === 'openrouter' || plan === 'nvidia') {
-      const { configManager } = await import('../utils/config.js');
-      const settings = configManager.getProviderSettings(plan);
-      const options: ProviderOptions = {
-        baseUrl: settings.baseUrl,
-        model: settings.model,
-        providerId: settings.providerId,
-        source: settings.source,
-        maxContextSize: settings.maxContextSize,
-      };
-      // All kimi-like providers are handled by the managers as plan 'kimi'
-      await manager.loadConfig('kimi', apiKey, options);
-      return;
-    }
+    const { configManager } = await import('../utils/config.js');
+    const settings = configManager.getProviderSettings(plan);
+    const options: ProviderOptions = {
+      baseUrl: settings.baseUrl,
+      model: settings.model,
+      providerId: settings.providerId,
+      source: settings.source,
+      maxContextSize: settings.maxContextSize,
+      ...overrides,
+    };
 
-    await manager.loadConfig(plan, apiKey);
+    // Pass the actual plan to the manager - each manager handles its own protocol requirements
+    await manager.loadConfig(plan, apiKey, options);
   }
 
   async unloadConfig(tool: string): Promise<void> {

@@ -8,9 +8,9 @@ export const CONFIG_FILE = join(CONFIG_DIR, 'config.yaml');
 export const LEGACY_CONFIG_DIR = join(homedir(), '.chelper');
 export const LEGACY_CONFIG_FILE = join(LEGACY_CONFIG_DIR, 'config.yaml');
 
-export type Plan = 'glm_coding_plan_global' | 'glm_coding_plan_china' | 'kimi' | 'openrouter' | 'nvidia';
+export type Plan = 'glm_coding_plan_global' | 'glm_coding_plan_china' | 'kimi' | 'openrouter' | 'nvidia' | 'lmstudio';
 
-export const KIMI_LIKE_PLANS: ReadonlySet<string> = new Set(['kimi', 'openrouter', 'nvidia']);
+export const KIMI_LIKE_PLANS: ReadonlySet<string> = new Set(['kimi', 'openrouter', 'nvidia', 'lmstudio']);
 
 export function isKimiLikePlan(plan: string | undefined): plan is 'kimi' | 'openrouter' | 'nvidia' {
   return !!plan && KIMI_LIKE_PLANS.has(plan);
@@ -41,16 +41,13 @@ export interface Config {
   // Provider profiles
   providers?: {
     glm?: {
-      global?: {
-        api_key?: string;
-      };
-      china?: {
-        api_key?: string;
-      };
+      global?: ProviderConfig;
+      china?: ProviderConfig;
     };
     kimi?: ProviderConfig;
     openrouter?: ProviderConfig;
     nvidia?: ProviderConfig;
+    lmstudio?: ProviderConfig;
   };
 }
 
@@ -361,30 +358,13 @@ export class ConfigManager {
     }
 
     // kimi, openrouter, nvidia
-    if (isKimiLikePlan(plan)) {
-      const prov = this.config.providers?.[plan];
-      return { plan, apiKey: prov?.api_key };
-    }
-
-    return { plan, apiKey: undefined };
+    const prov = (this.config.providers as any)?.[plan];
+    return { plan, apiKey: prov?.api_key };
   }
 
   setAuth(plan: Plan, apiKey: string) {
     this.config.plan = plan;
-    this.config.providers = this.config.providers && typeof this.config.providers === 'object' ? this.config.providers : {};
-
-    if (plan === 'glm_coding_plan_global') {
-      this.config.providers.glm = this.config.providers.glm && typeof this.config.providers.glm === 'object' ? this.config.providers.glm : {};
-      this.config.providers.glm.global = this.config.providers.glm.global && typeof this.config.providers.glm.global === 'object' ? this.config.providers.glm.global : {};
-      this.config.providers.glm.global.api_key = apiKey;
-    } else if (plan === 'glm_coding_plan_china') {
-      this.config.providers.glm = this.config.providers.glm && typeof this.config.providers.glm === 'object' ? this.config.providers.glm : {};
-      this.config.providers.glm.china = this.config.providers.glm.china && typeof this.config.providers.glm.china === 'object' ? this.config.providers.glm.china : {};
-      this.config.providers.glm.china.api_key = apiKey;
-    } else if (isKimiLikePlan(plan)) {
-      const existing = (this.config.providers[plan] && typeof this.config.providers[plan] === 'object') ? this.config.providers[plan]! : {};
-      this.config.providers[plan] = { ...existing, api_key: apiKey };
-    }
+    this.setApiKeyFor(plan, apiKey);
 
     // ensure we don't keep legacy key around
     delete this.config.api_key;
@@ -394,21 +374,20 @@ export class ConfigManager {
   getApiKeyFor(plan: Plan): string | undefined {
     if (plan === 'glm_coding_plan_global') return this.config.providers?.glm?.global?.api_key;
     if (plan === 'glm_coding_plan_china') return this.config.providers?.glm?.china?.api_key;
-    if (isKimiLikePlan(plan)) return this.config.providers?.[plan]?.api_key;
-    return undefined;
+    return (this.config.providers as any)?.[plan]?.api_key;
   }
 
   setApiKeyFor(plan: Plan, apiKey: string): void {
     this.config.providers = this.config.providers && typeof this.config.providers === 'object' ? this.config.providers : {};
     if (plan === 'glm_coding_plan_global') {
       this.config.providers.glm = this.config.providers.glm && typeof this.config.providers.glm === 'object' ? this.config.providers.glm : {};
-      this.config.providers.glm.global = this.config.providers.glm.global && typeof this.config.providers.glm.global === 'object' ? this.config.providers.glm.global : {};
-      this.config.providers.glm.global.api_key = apiKey;
+      const existing = (this.config.providers.glm.global && typeof this.config.providers.glm.global === 'object') ? this.config.providers.glm.global : {};
+      this.config.providers.glm.global = { ...existing, api_key: apiKey };
     } else if (plan === 'glm_coding_plan_china') {
       this.config.providers.glm = this.config.providers.glm && typeof this.config.providers.glm === 'object' ? this.config.providers.glm : {};
-      this.config.providers.glm.china = this.config.providers.glm.china && typeof this.config.providers.glm.china === 'object' ? this.config.providers.glm.china : {};
-      this.config.providers.glm.china.api_key = apiKey;
-    } else if (isKimiLikePlan(plan)) {
+      const existing = (this.config.providers.glm.china && typeof this.config.providers.glm.china === 'object') ? this.config.providers.glm.china : {};
+      this.config.providers.glm.china = { ...existing, api_key: apiKey };
+    } else {
       const existing = (this.config.providers[plan] && typeof this.config.providers[plan] === 'object') ? this.config.providers[plan]! : {};
       this.config.providers[plan] = { ...existing, api_key: apiKey };
     }
@@ -419,29 +398,36 @@ export class ConfigManager {
   private static readonly PROVIDER_DEFAULTS: Record<string, { baseUrl: string; model: string; source: string; maxContextSize?: number }> = {
     kimi: { baseUrl: 'https://api.moonshot.ai/v1', model: 'moonshot-ai/kimi-k2.5', source: 'moonshot', maxContextSize: 262144 },
     openrouter: { baseUrl: 'https://openrouter.ai/api/v1', model: 'moonshotai/kimi-k2.5', source: 'openrouter', maxContextSize: 16384 },
-    nvidia: { baseUrl: 'https://integrate.api.nvidia.com/v1', model: 'moonshotai/kimi-k2.5', source: 'nvidia', maxContextSize: 4096 }
+    nvidia: { baseUrl: 'https://integrate.api.nvidia.com/v1', model: 'moonshotai/kimi-k2.5', source: 'nvidia', maxContextSize: 4096 },
+    lmstudio: { baseUrl: 'http://localhost:1234/v1', model: 'lmstudio-community', source: 'lmstudio', maxContextSize: 128000 },
+    glm_coding_plan_global: { baseUrl: 'https://api.z.ai/api/coding/paas/v4', model: 'glm-4', source: 'glm-global', maxContextSize: 128000 },
+    glm_coding_plan_china: { baseUrl: 'https://open.bigmodel.cn/api/coding/paas/v4', model: 'glm-4', source: 'glm-china', maxContextSize: 128000 }
   };
 
   /**
-   * Get settings for any kimi-like provider (kimi, openrouter, nvidia).
+   * Get settings for any provider profile.
    * Falls back to the currently active plan if no plan argument is given.
    */
   getProviderSettings(plan?: string): ProviderSettings {
     const activePlan = plan || this.config.plan || 'kimi';
     const defaults = ConfigManager.PROVIDER_DEFAULTS[activePlan] || ConfigManager.PROVIDER_DEFAULTS.kimi;
 
-    if (isKimiLikePlan(activePlan)) {
-      const prov = this.config.providers?.[activePlan];
-      return {
-        baseUrl: (prov?.base_url ?? defaults.baseUrl).trim(),
-        model: prov?.model || defaults.model,
-        providerId: prov?.provider_id || undefined,
-        source: defaults.source,
-        maxContextSize: prov?.max_context_size ?? defaults.maxContextSize,
-      };
+    let prov: ProviderConfig | undefined;
+    if (activePlan === 'glm_coding_plan_global') {
+      prov = this.config.providers?.glm?.global;
+    } else if (activePlan === 'glm_coding_plan_china') {
+      prov = this.config.providers?.glm?.china;
+    } else {
+      prov = (this.config.providers as any)?.[activePlan];
     }
 
-    return { baseUrl: defaults.baseUrl, model: defaults.model, source: defaults.source };
+    return {
+      baseUrl: (prov?.base_url ?? defaults.baseUrl).trim(),
+      model: prov?.model || defaults.model,
+      providerId: prov?.provider_id || undefined,
+      source: defaults.source,
+      maxContextSize: prov?.max_context_size ?? defaults.maxContextSize,
+    };
   }
 
   /** @deprecated Use getProviderSettings instead */
@@ -449,13 +435,23 @@ export class ConfigManager {
     return this.getProviderSettings(this.config.plan || 'kimi');
   }
 
-  setProviderProfile(plan: 'kimi' | 'openrouter' | 'nvidia', profile: { base_url?: string; model?: string; provider_id?: string; max_context_size?: number }): void {
+  setProviderProfile(plan: Plan, profile: { base_url?: string; model?: string; provider_id?: string; max_context_size?: number }): void {
     this.config.providers = this.config.providers && typeof this.config.providers === 'object' ? this.config.providers : {};
-    const existing = (this.config.providers[plan] && typeof this.config.providers[plan] === 'object') ? this.config.providers[plan]! : {};
-    this.config.providers[plan] = {
-      ...existing,
-      ...profile
-    };
+    if (plan === 'glm_coding_plan_global') {
+      this.config.providers.glm = this.config.providers.glm && typeof this.config.providers.glm === 'object' ? this.config.providers.glm : {};
+      const existing = (this.config.providers.glm.global && typeof this.config.providers.glm.global === 'object') ? this.config.providers.glm.global : {};
+      this.config.providers.glm.global = { ...existing, ...profile };
+    } else if (plan === 'glm_coding_plan_china') {
+      this.config.providers.glm = this.config.providers.glm && typeof this.config.providers.glm === 'object' ? this.config.providers.glm : {};
+      const existing = (this.config.providers.glm.china && typeof this.config.providers.glm.china === 'object') ? this.config.providers.glm.china : {};
+      this.config.providers.glm.china = { ...existing, ...profile };
+    } else {
+      const existing = (this.config.providers[plan] && typeof this.config.providers[plan] === 'object') ? this.config.providers[plan]! : {};
+      this.config.providers[plan] = {
+        ...existing,
+        ...profile
+      };
+    }
     this.save();
   }
 
@@ -500,6 +496,7 @@ export class ConfigManager {
     if (this.config.providers?.kimi) delete this.config.providers.kimi.api_key;
     if (this.config.providers?.openrouter) delete this.config.providers.openrouter.api_key;
     if (this.config.providers?.nvidia) delete this.config.providers.nvidia.api_key;
+    if (this.config.providers?.lmstudio) delete this.config.providers.lmstudio.api_key;
     this.save();
   }
 

@@ -51,7 +51,8 @@ export class OpenCodeManager {
   }
 
   private getProviderName(plan: string): string {
-    if (plan === 'kimi') {
+    // All kimi-like providers (kimi, openrouter, nvidia) use the moonshot-ai-coding provider
+    if (plan === 'kimi' || plan === 'openrouter' || plan === 'nvidia') {
       return 'moonshot-ai-coding';
     }
     return plan === 'glm_coding_plan_global' ? 'zai-coding-plan' : 'zhipuai-coding-plan';
@@ -74,38 +75,46 @@ export class OpenCodeManager {
       }
     }
 
+    const source = (options?.source || '').toString().trim().toLowerCase();
+    const baseUrl = options?.baseUrl?.trim();
+    const modelId = options?.model?.trim();
+
     // Add new provider configuration
-    if (plan === 'kimi') {
-      const source = (options?.source || '').toString().trim().toLowerCase();
+    // All kimi-like providers (kimi, openrouter, nvidia) use OpenAI-compatible API
+    if (plan === 'kimi' || plan === 'openrouter' || plan === 'nvidia') {
       // Only the native Moonshot API supports extended thinking / reasoning mode.
-      // Third-party endpoints (NVIDIA NIM, OpenRouter, custom) serve standard chat
-      // completions and will hang if the client tries to use thinking parameters.
       const supportsThinking = (source === '' || source === 'moonshot');
       newProvider[providerName] = {
         options: {
           apiKey: apiKey,
-          baseUrl: options?.baseUrl?.trim() || 'https://api.moonshot.ai/v1',
+          baseUrl: baseUrl || 'https://api.moonshot.ai/v1',
           ...(supportsThinking ? {} : { reasoning: false, thinking: false })
         }
       };
     } else {
       newProvider[providerName] = {
         options: {
-          apiKey: apiKey
+          apiKey: apiKey,
+          ...(baseUrl ? { baseUrl } : {})
         }
       };
     }
 
-    const kimiBaseModel = (options?.model?.trim() || 'kimi-k2.5');
-    // OpenCode model strings are typically "<provider>/<model>". Allow model ids with slashes by keeping them as the "rest".
-    const kimiModelRef = kimiBaseModel.startsWith(`${providerName}/`) ? kimiBaseModel : `${providerName}/${kimiBaseModel}`;
+    // Default models if not provided
+    const defaultModel = (plan === 'kimi' || plan === 'openrouter' || plan === 'nvidia') 
+      ? 'kimi-k2.5' 
+      : (plan === 'glm_coding_plan_global' ? 'glm-4-coder' : 'glm-4-plus');
+    const targetModel = modelId || defaultModel;
+    
+    // OpenCode model strings are typically "<provider>/<model>". 
+    const modelRef = targetModel.includes('/') ? targetModel : `${providerName}/${targetModel}`;
 
     const newConfig = {
       $schema: 'https://opencode.ai/config.json',
       ...restConfig,
       provider: newProvider,
-      model: plan === 'kimi' ? kimiModelRef : `${providerName}/glm-4.6`,
-      small_model: plan === 'kimi' ? kimiModelRef : `${providerName}/glm-4.5-air`
+      model: modelRef,
+      small_model: modelRef
     };
 
     this.saveConfig(newConfig);

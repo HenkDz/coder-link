@@ -183,9 +183,6 @@ export class KimiManager {
   }
 
   async loadConfig(plan: string, apiKey: string, options?: ProviderOptions): Promise<void> {
-    if (plan !== 'kimi') {
-      throw new Error(`KimiManager only supports plan 'kimi' (got: ${plan})`);
-    }
     if (!apiKey || !apiKey.trim()) {
       throw new Error('API key cannot be empty');
     }

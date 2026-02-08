@@ -5,6 +5,26 @@ import { logger } from '../utils/logger.js';
 import { MCPService } from './tool-manager.js';
 import type { ProviderOptions } from './tool-manager.js';
 
+/**
+ * Claude Code Manager
+ * 
+ * Claude Code requires an Anthropic-compatible API that uses:
+ * - POST to /v1/messages endpoint
+ * - Anthropic request/response format (not OpenAI)
+ * 
+ * Claude Code constructs API URLs by appending /v1/messages to ANTHROPIC_BASE_URL.
+ * So the base URL should NOT include /v1 or the messages path.
+ * 
+ * Supported providers:
+ * - GLM Coding Plan (Global): https://api.z.ai/api/anthropic → calls /api/anthropic/v1/messages
+ * - GLM Coding Plan (China): https://open.bigmodel.cn/api/anthropic → calls /api/anthropic/v1/messages
+ * - OpenRouter: https://openrouter.ai/api → calls /api/v1/messages (OpenRouter supports Anthropic format)
+ * 
+ * NOT supported (OpenAI-compatible only, no /v1/messages endpoint):
+ * - Kimi/Moonshot: Only provides /v1/chat/completions
+ * - NVIDIA NIM: Only provides /v1/chat/completions
+ */
+
 export class ClaudeCodeManager {
   static instance: ClaudeCodeManager | null = null;
   private settingsPath: string;
@@ -77,50 +97,68 @@ export class ClaudeCodeManager {
   }
 
   async loadConfig(plan: string, apiKey: string, options?: ProviderOptions): Promise<void> {
-    // 1. 确保 .claude.json 中有 hasCompletedOnboarding: true
+    // 1. Ensure onboarding completed
     this.ensureOnboardingCompleted();
-    // 2. 清理 shell rc 文件中的 ANTHROPIC_API_KEY 和 ANTHROPIC_BASE_URL
+    // 2. Clean up shell environmental variables
     this.cleanupShellEnvVars();
-    // 3. 加载配置到 settings.json
+    // 3. Load configurations to settings.json
     const currentSettings = this.getSettings();
-    // 从 env 中移除 ANTHROPIC_API_KEY（如果存在），统一使用 ANTHROPIC_AUTH_TOKEN
     const currentEnv = currentSettings.env || {};
     const { ANTHROPIC_API_KEY: _, ...cleanedEnv } = currentEnv;
 
-    let glmConfig: any;
-    if (plan === 'kimi') {
-      const source = (options?.source || '').toString().trim().toLowerCase();
-      const baseUrl = options?.baseUrl?.trim() || 'https://api.moonshot.ai/v1';
+    const source = (options?.source || '').toString().trim().toLowerCase();
 
-      if (source === 'nvidia' || baseUrl.includes('integrate.api.nvidia.com')) {
-        throw new Error(
-          'Claude Code expects an Anthropic-compatible API (e.g., /v1/messages). NVIDIA NIM for Kimi is OpenAI chat-completions (POST /v1/chat/completions), so this combination is not supported.'
-        );
-      }
-      glmConfig = {
-        ...currentSettings,
-        env: {
-          ...cleanedEnv,
-          ANTHROPIC_AUTH_TOKEN: apiKey,
-          ANTHROPIC_BASE_URL: baseUrl,
-          API_TIMEOUT_MS: '3000000',
-          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: 1
-        }
-      };
+    // Claude Code requires Anthropic-compatible API (POST /v1/messages endpoint)
+    // It appends /v1/messages to ANTHROPIC_BASE_URL, so base URL should NOT include /v1
+    let baseUrl: string;
+    
+    if (plan === 'kimi') {
+      // Kimi/Moonshot only provides OpenAI-compatible API (/v1/chat/completions)
+      // They do NOT support Anthropic's /v1/messages endpoint
+      throw new Error(
+        'Claude Code requires an Anthropic-compatible API (/v1/messages). ' +
+        'Kimi/Moonshot only provides OpenAI-compatible API (/v1/chat/completions). ' +
+        'Use a different tool (like OpenCode, Crush, or Pi) for Kimi, or use GLM Coding Plan with Claude Code.'
+      );
+    }
+    
+    if (plan === 'openrouter') {
+      // OpenRouter supports Anthropic format at /api/v1/messages when base is /api
+      // Claude Code appends /v1/messages, so: openrouter.ai/api + /v1/messages = /api/v1/messages
+      baseUrl = 'https://openrouter.ai/api';
+    } else if (plan === 'nvidia') {
+      // NVIDIA NIM only provides OpenAI-compatible API
+      throw new Error(
+        'Claude Code requires an Anthropic-compatible API (/v1/messages). ' +
+        'NVIDIA NIM only provides OpenAI-compatible API (/v1/chat/completions). ' +
+        'Use a different tool (like OpenCode, Crush, or Pi) for NVIDIA NIM, or use GLM Coding Plan with Claude Code.'
+      );
+    } else if (plan === 'glm_coding_plan_global') {
+      // GLM Coding Plan Global - use Anthropic-compatible endpoint (NOT the OpenAI endpoint from profile)
+      baseUrl = 'https://api.z.ai/api/anthropic';
+    } else if (plan === 'glm_coding_plan_china') {
+      // GLM Coding Plan China - use Anthropic-compatible endpoint (NOT the OpenAI endpoint from profile)
+      baseUrl = 'https://open.bigmodel.cn/api/anthropic';
+    } else if (options?.baseUrl?.trim()) {
+      // Custom/unknown provider - use provided URL as-is
+      baseUrl = options.baseUrl.trim();
     } else {
-      glmConfig = {
-        ...currentSettings,
-        env: {
-          ...cleanedEnv,
-          ANTHROPIC_AUTH_TOKEN: apiKey,
-          ANTHROPIC_BASE_URL: plan === 'glm_coding_plan_global' ? 'https://api.z.ai/api/anthropic' : 'https://open.bigmodel.cn/api/anthropic',
-          API_TIMEOUT_MS: '3000000',
-          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: 1
-        }
-      };
+      // Fallback (should not reach here for known plans)
+      baseUrl = 'https://api.z.ai/api/anthropic';
     }
 
-    this.saveSettings(glmConfig);
+    const newConfig = {
+      ...currentSettings,
+      env: {
+        ...cleanedEnv,
+        ANTHROPIC_AUTH_TOKEN: apiKey,
+        ANTHROPIC_BASE_URL: baseUrl,
+        API_TIMEOUT_MS: '3000000',
+        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: 1
+      }
+    };
+
+    this.saveSettings(newConfig);
   }
 
   async unloadConfig(): Promise<void> {
@@ -150,18 +188,26 @@ export class ClaudeCodeManager {
       const apiKey = settings.env.ANTHROPIC_AUTH_TOKEN;
       const baseUrl = settings.env.ANTHROPIC_BASE_URL;
       let plan: string | null = null;
+      
+      // GLM endpoints
       if (baseUrl === 'https://api.z.ai/api/anthropic') {
         plan = 'glm_coding_plan_global';
       } else if (baseUrl === 'https://open.bigmodel.cn/api/anthropic') {
         plan = 'glm_coding_plan_china';
       } else if (baseUrl?.includes('openrouter.ai')) {
+        // OpenRouter - base is typically https://openrouter.ai/api
         plan = 'openrouter';
       } else if (baseUrl?.includes('nvidia.com')) {
+        // NVIDIA - should not work but detect anyway
         plan = 'nvidia';
+      } else if (baseUrl?.includes('moonshot.ai') || baseUrl?.includes('kimi')) {
+        // Kimi/Moonshot - should not work but detect anyway
+        plan = 'kimi';
       } else if (baseUrl) {
-        // Treat any other configured base URL as a user-configured Kimi/custom endpoint.
+        // Custom endpoint - treat as kimi-like for detection purposes
         plan = 'kimi';
       }
+      
       // Claude Code doesn't store model in settings, it's configured at runtime
       return { plan, apiKey, model: undefined };
     } catch {

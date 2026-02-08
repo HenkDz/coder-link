@@ -90,9 +90,6 @@ export class PiManager {
   }
 
   async loadConfig(plan: string, apiKey: string, options?: ProviderOptions): Promise<void> {
-    if (plan !== 'kimi') {
-      throw new Error(`Pi automatic config currently supports only 'kimi' (got: ${plan})`);
-    }
     if (!apiKey || !apiKey.trim()) {
       throw new Error('API key cannot be empty');
     }
@@ -106,14 +103,14 @@ export class PiManager {
     const apiMode = 'openai-completions';
 
     // Only the native Moonshot API supports Kimi's extended-thinking / reasoning mode.
-    // Third-party endpoints (NVIDIA NIM, OpenRouter, custom) serve standard chat completions
-    // and will hang or error if reasoning tokens are requested.
     const supportsReasoning = (source === '' || source === 'moonshot');
 
     const modelName = (() => {
       if (source === 'nvidia') return 'Kimi K2.5 (NVIDIA)';
       if (source === 'openrouter') return 'Kimi K2.5 (OpenRouter)';
-      if (source === 'custom') return 'Kimi K2.5 (Custom)';
+      if (source === 'glm-global') return 'GLM (Global)';
+      if (source === 'glm-china') return 'GLM (China)';
+      if (source === 'custom') return 'Custom Model';
       return 'Kimi K2.5';
     })();
 

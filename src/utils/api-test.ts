@@ -5,6 +5,64 @@ export type ApiTestResult = {
   detail: string;
 };
 
+export interface ModelInfo {
+  id: string;
+  contextLength?: number;
+  name?: string;
+}
+
+/**
+ * Fetch model details from OpenRouter's /models endpoint.
+ * Returns context_length and other metadata for a specific model.
+ */
+export async function fetchOpenRouterModelInfo(params: {
+  apiKey: string;
+  modelId: string;
+  timeoutMs?: number;
+}): Promise<ModelInfo | null> {
+  const timeoutMs = params.timeoutMs ?? 10000;
+  const apiKey = params.apiKey.trim();
+  const modelId = params.modelId.trim();
+
+  if (!apiKey || !modelId) return null;
+
+  try {
+    const resp = await fetchWithTimeout(
+      'https://openrouter.ai/api/v1/models',
+      {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        }
+      },
+      timeoutMs
+    );
+
+    if (!resp.ok) return null;
+
+    const text = await resp.text();
+    const json = JSON.parse(text);
+
+    if (!json?.data || !Array.isArray(json.data)) return null;
+
+    // Find the model by ID (case-insensitive match)
+    const model = json.data.find(
+      (m: any) => m?.id && m.id.toLowerCase() === modelId.toLowerCase()
+    );
+
+    if (!model) return null;
+
+    return {
+      id: model.id,
+      contextLength: typeof model.context_length === 'number' ? model.context_length : undefined,
+      name: typeof model.name === 'string' ? model.name : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
 function joinUrl(baseUrl: string, path: string): string {
   const base = baseUrl.replace(/\/+$/g, '');
   const p = path.startsWith('/') ? path : `/${path}`;

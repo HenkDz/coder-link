@@ -76,8 +76,14 @@ export class FactoryDroidManager {
   }
 
   private getBaseUrl(plan: string, protocol: 'anthropic' | 'openai', options?: ProviderOptions): string {
+    if (options?.baseUrl?.trim()) {
+      const url = options.baseUrl.trim();
+      // If user provided a base URL, they might want to use it for both protocols, 
+      // but usually the generic-chat-completion-api works best with OpenAI-like paths.
+      return url;
+    }
     if (plan === 'kimi') {
-      return options?.baseUrl?.trim() || 'https://api.moonshot.ai/v1';
+      return 'https://api.moonshot.ai/v1';
     }
     if (protocol === 'anthropic') {
       return plan === 'glm_coding_plan_global'
@@ -115,8 +121,10 @@ export class FactoryDroidManager {
   async loadConfig(plan: string, apiKey: string, options?: ProviderOptions): Promise<void> {
     const currentConfig = this.getConfig();
 
-    const kimiModel = options?.model?.trim() || 'moonshotai/kimi-k2.5';
-    const baseUrl = options?.baseUrl?.trim() || 'https://api.moonshot.ai/v1';
+    const targetModel = options?.model?.trim() || (plan === 'kimi' ? 'moonshotai/kimi-k2.5' : 'glm-4-coder');
+    // For Kimi/NVIDIA/OpenRouter, we use the provided/detected baseUrl. 
+    // For GLM, we might still want to use the dual-protocol endpoints if no override is provided.
+    const baseUrl = options?.baseUrl?.trim() || (plan === 'kimi' ? 'https://api.moonshot.ai/v1' : this.getBaseUrl(plan, 'openai', options));
 
     // Filter out old GLM/Kimi/OpenRouter/NVIDIA Coding Plan configurations (by displayName)
     // This ensures refresh properly updates the config
@@ -132,13 +140,11 @@ export class FactoryDroidManager {
     if (plan === 'kimi') {
       const source = (options?.source || '').toString().trim().toLowerCase();
       // Only the native Moonshot API supports extended thinking / reasoning mode.
-      // Third-party endpoints (NVIDIA NIM, OpenRouter, custom) serve standard chat
-      // completions and will hang if the client tries to use thinking parameters.
       const supportsThinking = (source === '' || source === 'moonshot');
       const displayName = this.getDisplayName(plan, 'openai', options);
       const openaiModel: Record<string, any> = {
         displayName,
-        model: kimiModel,
+        model: targetModel,
         baseUrl: baseUrl,
         apiKey,
         provider: 'generic-chat-completion-api',
@@ -174,7 +180,7 @@ export class FactoryDroidManager {
     // Create Anthropic protocol configuration
     const anthropicModel = {
       displayName: this.getDisplayName(plan, 'anthropic', options),
-      model: plan === 'kimi' ? kimiModel : 'glm-4.7',
+      model: targetModel,
       baseUrl: this.getBaseUrl(plan, 'anthropic', options),
       apiKey,
       provider: 'anthropic',
@@ -184,7 +190,7 @@ export class FactoryDroidManager {
     // Create OpenAI Chat Completion protocol configuration
     const openaiModel = {
       displayName: this.getDisplayName(plan, 'openai', options),
-      model: plan === 'kimi' ? kimiModel : 'glm-4.7',
+      model: targetModel,
       baseUrl: this.getBaseUrl(plan, 'openai', options),
       apiKey,
       provider: 'generic-chat-completion-api',
