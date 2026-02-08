@@ -1,13 +1,16 @@
 import inquirer from 'inquirer';
 import chalk from 'chalk';
 import ora, { type Ora } from 'ora';
-import { configManager, isKimiLikePlan } from './utils/config.js';
+import { existsSync, readFileSync, writeFileSync } from 'fs';
+import { join } from 'path';
+import { homedir } from 'os';
+import { configManager, isKimiLikePlan, CONFIG_DIR } from './utils/config.js';
 import type { Plan } from './utils/config.js';
 import { i18n } from './utils/i18n.js';
 import { toolManager } from './lib/tool-manager.js';
 import { logger } from './utils/logger.js';
 import { BUILTIN_MCP_SERVICES } from './mcp-services.js';
-import { commandExists, runInteractive, runInteractiveWithEnv } from './utils/exec.js';
+import { commandExists, runInteractive, runInteractiveWithEnv, runInNewTerminal } from './utils/exec.js';
 import { testOpenAIChatCompletionsApi, testOpenAICompatibleApi } from './utils/api-test.js';
 import { 
   printSplash, 
@@ -22,7 +25,6 @@ import {
   statusIndicator,
   truncateForTerminal,
 } from './utils/brand.js';
-import { keyboardHandler } from './utils/keyboard.js';
 import { printError, printSuccess, printWarning, printInfo } from './utils/output.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────
@@ -87,14 +89,43 @@ function installHint(tool: string): { label: string; command?: string } {
 async function pause(message = 'Press Enter to continue... (or q to quit)'): Promise<void> {
   return new Promise((resolve) => {
     console.log(chalk.gray(`  ${message}`));
-    process.stdin.once('data', (data) => {
+
+    // Inquirer/readline can leave stdin paused after a prompt.
+    // If stdin is paused, a pending `once('data')` listener does not keep the
+    // event loop alive and the process may exit immediately.
+    if (process.stdin.isTTY) {
+      process.stdin.resume();
+    }
+
+    const onData = (data: Buffer | string) => {
+      cleanup();
       const str = data.toString().trim();
       if (str === 'q' || str === 'Q') {
         console.log(chalk.gray('\n  Goodbye!\n'));
         process.exit(0);
       }
       resolve();
-    });
+    };
+
+    const onEnd = () => {
+      cleanup();
+      resolve();
+    };
+
+    const onError = () => {
+      cleanup();
+      resolve();
+    };
+
+    const cleanup = () => {
+      process.stdin.removeListener('data', onData as any);
+      process.stdin.removeListener('end', onEnd);
+      process.stdin.removeListener('error', onError);
+    };
+
+    process.stdin.on('data', onData as any);
+    process.stdin.once('end', onEnd);
+    process.stdin.once('error', onError);
   });
 }
 
@@ -132,7 +163,7 @@ async function providerSetupFlow(currentPlan?: Plan): Promise<void> {
         name: c.value === currentPlan ? `${c.name} ${chalk.green('●')}` : c.name,
       })),
       new inquirer.Separator(),
-      { name: chalk.gray('← Back (Esc)'), value: '__back' as any },
+      { name: chalk.gray('← Back'), value: '__back' as any },
     ],
     default: currentPlan,
   }]);
@@ -371,9 +402,35 @@ async function mcpMenu(tool: string): Promise<void> {
           ],
         }]);
         if (id === '__back') continue;
+
+        const { target } = await inquirer.prompt<{ target: 'this' | 'all' }>([{
+          type: 'list',
+          name: 'target',
+          message: 'Install to:',
+          choices: [
+            { name: `Only ${toolLabel(tool)}`, value: 'this' },
+            { name: 'Apply to ALL supported tools', value: 'all' },
+          ],
+        }]);
+
         const service = BUILTIN_MCP_SERVICES.find(s => s.id === id)!;
-        await toolManager.installMCP(tool, service, auth.apiKey, auth.plan);
-        printSuccess(`Installed ${id}`);
+        if (target === 'all') {
+          const tools = toolManager.getSupportedTools();
+          const spinner = createSafeSpinner(`Installing ${id} to all tools...`).start();
+          let success = 0;
+          for (const t of tools) {
+            try {
+              await toolManager.installMCP(t, service, auth.apiKey, auth.plan!);
+              success++;
+            } catch (e) {
+              // skip errors for individual tools
+            }
+          }
+          spinner.succeed(`Installed ${id} to ${success}/${tools.length} tools`);
+        } else {
+          await toolManager.installMCP(tool, service, auth.apiKey, auth.plan!);
+          printSuccess(`Installed ${id} to ${toolLabel(tool)}`);
+        }
         await pause();
       } else if (action === 'uninstall') {
         const { id } = await inquirer.prompt<{ id: string | '__back' }>([{
@@ -465,7 +522,7 @@ async function toolMenu(tool: string): Promise<void> {
     printNavigationHints();
 
     // Build dynamic choices
-    type ToolAction = 'refresh' | 'unload' | 'mcp' | 'start' | '__back';
+    type ToolAction = 'refresh' | 'unload' | 'mcp' | 'start' | 'start_new' | 'start_same' | '__back';
     const choices: Array<{ name: string; value: ToolAction } | inquirer.Separator> = [];
 
     if (hasProvider && !isInSync) {
@@ -491,13 +548,24 @@ async function toolMenu(tool: string): Promise<void> {
       printWarning(`${toolLabel(tool)} was not detected on PATH`, installHint(tool).command ? `Install: ${installHint(tool).command}` : 'Please install it using the vendor instructions.');
     }
     
-    choices.push({ 
-      name: installed ? `🚀 Launch ${toolLabel(tool)}` : chalk.yellow(`🚀 Launch ${toolLabel(tool)} (not detected)`), 
-      value: 'start',
-    });
+    if (process.platform === 'win32') {
+      choices.push({ 
+        name: installed ? `🚀 Launch ${toolLabel(tool)} (New Window)` : chalk.yellow(`🚀 Launch ${toolLabel(tool)} (New Window - not detected)`), 
+        value: 'start_new',
+      });
+      choices.push({ 
+        name: installed ? `🚀 Launch ${toolLabel(tool)} (This Terminal)` : chalk.yellow(`🚀 Launch ${toolLabel(tool)} (This Terminal - not detected)`), 
+        value: 'start_same',
+      });
+    } else {
+      choices.push({ 
+        name: installed ? `🚀 Launch ${toolLabel(tool)}` : chalk.yellow(`🚀 Launch ${toolLabel(tool)} (not detected)`), 
+        value: 'start',
+      });
+    }
     
     choices.push(new inquirer.Separator());
-    choices.push({ name: chalk.gray('← Back (Esc)'), value: '__back' });
+    choices.push({ name: chalk.gray('← Back'), value: '__back' });
 
     const { action } = await inquirer.prompt<{ action: ToolAction }>([{
       type: 'list',
@@ -544,6 +612,10 @@ async function toolMenu(tool: string): Promise<void> {
         await mcpMenu(tool);
       } else if (action === 'start') {
         await launchTool(tool);
+      } else if (action === 'start_new') {
+        await launchTool(tool, 'new');
+      } else if (action === 'start_same') {
+        await launchTool(tool, 'same');
       }
     } catch (error) {
       logger.logError('menu.toolAction', error);
@@ -556,8 +628,9 @@ async function toolMenu(tool: string): Promise<void> {
   }
 }
 
-async function launchTool(tool: string): Promise<void> {
+async function launchTool(tool: string, mode?: 'same' | 'new'): Promise<void> {
   const start = startCommand(tool);
+  configManager.setLastUsedTool(tool);
 
   // Check sync status before launching
   const auth = configManager.getAuth();
@@ -622,29 +695,36 @@ async function launchTool(tool: string): Promise<void> {
   if (!commandExists(start.cmd)) {
     console.log();
     printWarning(`${toolLabel(tool)} was not detected on PATH.`);
-    const { runAnyway } = await inquirer.prompt<{ runAnyway: boolean }>([
+    const hint = installHint(tool);
+    
+    const choices = [
+      { name: '🚀 Try launching anyway', value: 'anyway' },
+    ];
+    
+    if (hint.command) {
+      choices.push({ name: `🛠 Attempt to Install (${hint.label})`, value: 'install' });
+    }
+    
+    choices.push({ name: chalk.gray('← Cancel'), value: 'cancel' });
+
+    const { failAction } = await inquirer.prompt<{ failAction: 'anyway' | 'install' | 'cancel' }>([
       {
-        type: 'confirm',
-        name: 'runAnyway',
-        message: 'Try launching anyway?',
-        default: true,
+        type: 'list',
+        name: 'failAction',
+        message: 'What would you like to do?',
+        choices,
       },
     ]);
-    if (!runAnyway) {
-      const hint = installHint(tool);
-      if (hint.command) {
-        console.log(`  Install: ${chalk.cyan(hint.command)}`);
-        const { run } = await inquirer.prompt<{ run: boolean }>([
-          {
-            type: 'confirm',
-            name: 'run',
-            message: 'Run install command now?',
-            default: false,
-          },
-        ]);
-        if (run) await runInteractive(hint.command, []);
-      } else {
-        console.log('  Please install it using the vendor instructions.');
+
+    if (failAction === 'cancel') return;
+    
+    if (failAction === 'install') {
+      console.log(`\n  Running: ${chalk.cyan(hint.command!)}\n`);
+      try {
+        await runInteractive(hint.command!, []);
+        printSuccess('Installation command completed.');
+      } catch (err) {
+        printError('Installation failed', err instanceof Error ? err.message : String(err));
       }
       await pause();
       return;
@@ -652,6 +732,26 @@ async function launchTool(tool: string): Promise<void> {
   }
 
   console.log(chalk.gray('\n  Launching... (exit the tool to return here)\n'));
+
+  // Some interactive CLIs can freeze when launched inside the same terminal
+  // that is used for Inquirer prompts (especially on Windows).
+  // Offer launching in a new terminal window/tab.
+  let launchMode: 'same' | 'new' = mode || 'same';
+  if (!mode && process.platform === 'win32') {
+    const { mode: selectedMode } = await inquirer.prompt<{ mode: 'same' | 'new' }>([
+      {
+        type: 'list',
+        name: 'mode',
+        message: 'Launch in:',
+        choices: [
+          { name: 'New terminal window/tab', value: 'new' },
+          { name: 'This terminal', value: 'same' },
+        ],
+        default: 'new',
+      },
+    ]);
+    launchMode = selectedMode;
+  }
 
   if (tool === 'factory-droid') {
     let factoryKey = configManager.getFactoryApiKey() || process.env.FACTORY_API_KEY;
@@ -678,8 +778,24 @@ async function launchTool(tool: string): Promise<void> {
         factoryKey = trimmed;
       }
     }
+    if (launchMode === 'new') {
+      const ok = runInNewTerminal(start.cmd, start.args, { FACTORY_API_KEY: factoryKey });
+      if (!ok) {
+        printWarning('Failed to open a new terminal window. Launching here instead.');
+        await runInteractiveWithEnv(start.cmd, start.args, { FACTORY_API_KEY: factoryKey });
+      }
+      return;
+    }
     await runInteractiveWithEnv(start.cmd, start.args, { FACTORY_API_KEY: factoryKey });
   } else {
+    if (launchMode === 'new') {
+      const ok = runInNewTerminal(start.cmd, start.args);
+      if (!ok) {
+        printWarning('Failed to open a new terminal window. Launching here instead.');
+        await runInteractive(start.cmd, start.args);
+      }
+      return;
+    }
     await runInteractive(start.cmd, start.args);
   }
 }
@@ -725,7 +841,7 @@ async function toolSelectMenu(): Promise<void> {
           };
         }),
         new inquirer.Separator(),
-        { name: chalk.gray('← Back (Esc)'), value: '__back' },
+        { name: chalk.gray('← Back'), value: '__back' },
       ],
     }]);
 
@@ -734,21 +850,103 @@ async function toolSelectMenu(): Promise<void> {
   }
 }
 
+async function diagnosticsMenu(): Promise<void> {
+  console.clear();
+  printHeader('System Diagnostics');
+  const auth = configManager.getAuth();
+  const plan = auth.plan as Plan | undefined;
+  const apiKey = auth.apiKey;
+
+  console.log(`  ${i18n.t('doctor.config_path', { path: configManager.configPath })}`);
+  console.log(`  ${i18n.t('doctor.current_auth')}`);
+  if (plan && apiKey) {
+    console.log(`    ${i18n.t('doctor.plan')}: ${planLabelColored(plan)}`);
+    console.log(`    ${i18n.t('doctor.api_key')}: ${maskApiKey(apiKey)}`);
+  } else {
+    console.log(`    ${chalk.yellow(i18n.t('doctor.not_set'))}`);
+  }
+
+  console.log('\n  ' + i18n.t('doctor.tools_header'));
+  const tools = toolManager.getSupportedTools();
+  for (const tool of tools) {
+     const status = await toolManager.isConfigured(tool);
+     console.log(`    ${statusIndicator(status)} ${toolLabel(tool)}`);
+  }
+
+  // MCP status
+  const { kimiManager } = await import('./lib/kimi-manager.js');
+  const mcpInstalled = kimiManager.getInstalledMCPs();
+  console.log('\n  ' + i18n.t('doctor.mcp_header'));
+  if (mcpInstalled.length === 0) {
+    console.log(`    ${chalk.gray(i18n.t('doctor.none'))}`);
+  } else {
+    for (const id of mcpInstalled) {
+      console.log(`    ${chalk.green('●')} ${id}`);
+    }
+  }
+
+  console.log();
+  await pause();
+}
+
+async function logsMenu(): Promise<void> {
+  const LOG_DIR = join(CONFIG_DIR, 'logs');
+  const LOG_FILE = join(LOG_DIR, 'error.log');
+  
+  while (true) {
+    console.clear();
+    printHeader('Error Logs');
+    
+    if (!existsSync(LOG_FILE)) {
+      printInfo('No logs found.');
+    } else {
+      try {
+        const logs = readFileSync(LOG_FILE, 'utf-8');
+        const lines = logs.split('\n').filter(l => l.trim()).slice(-15);
+        if (lines.length === 0) {
+          printInfo('Log file is empty.');
+        } else {
+          console.log(chalk.gray('  Last 15 log entries:\n'));
+          lines.forEach(line => {
+            if (line.includes('[ERROR]')) {
+              console.log(`  ${chalk.red(line)}`);
+            } else if (line.includes('[WARN]')) {
+              console.log(`  ${chalk.yellow(line)}`);
+            } else {
+              console.log(`  ${chalk.gray(line)}`);
+            }
+          });
+        }
+      } catch (e) {
+        printError('Failed to read log file');
+      }
+    }
+    
+    console.log();
+    const { action } = await inquirer.prompt<{ action: 'clear' | 'back' }>([{
+      type: 'list',
+      name: 'action',
+      message: 'Action:',
+      choices: [
+        { name: '🗑 Clear Logs', value: 'clear' },
+        new inquirer.Separator(),
+        { name: chalk.gray('← Back'), value: 'back' }
+      ]
+    }]);
+
+    if (action === 'back') return;
+    
+    if (action === 'clear' && existsSync(LOG_FILE)) {
+      writeFileSync(LOG_FILE, '', 'utf-8');
+      printSuccess('Logs cleared');
+      await pause();
+    }
+  }
+}
+
 // ── Main Menu ──────────────────────────────────────────────────────────
 export async function runMenu(): Promise<void> {
   i18n.setLang(configManager.getLang());
-
-  // Enable keyboard shortcuts
-  keyboardHandler.enable(
-    () => {
-      console.log(chalk.gray('\n  Goodbye!\n'));
-      keyboardHandler.disable();
-      process.exit(0);
-    },
-    () => {
-      // Back navigation handled by '__back' choices
-    }
-  );
 
   // Show splash only on first launch
   console.clear();
@@ -763,30 +961,61 @@ export async function runMenu(): Promise<void> {
     printStatusBar(auth.plan, auth.apiKey, auth.plan ? providerSummary(auth.plan as Plan).trim() : undefined);
     printNavigationHints();
 
+    const lastTool = configManager.getLastUsedTool();
+    const mainChoices: any[] = [];
+
+    if (lastTool) {
+      const { cmd } = startCommand(lastTool);
+      const installed = commandExists(cmd);
+      if (installed) {
+        if (process.platform === 'win32') {
+          mainChoices.push({ name: `🚀 Quick Launch: ${toolLabel(lastTool)} (New)`, value: 'quick_new' });
+          mainChoices.push({ name: `🚀 Quick Launch: ${toolLabel(lastTool)} (Same)`, value: 'quick_same' });
+        } else {
+          mainChoices.push({ name: `🚀 Quick Launch: ${toolLabel(lastTool)}`, value: 'quick' });
+        }
+        mainChoices.push(new inquirer.Separator());
+      }
+    }
+
+    mainChoices.push(
+      { name: '⚡ Provider & API Key', value: 'provider' },
+      { name: '🛠 Coding Tools', value: 'tools' },
+      { name: '🌐 Language', value: 'lang' },
+      new inquirer.Separator(),
+      { name: '🔬 System Diagnostics (Doctor)', value: 'doctor' },
+      { name: '📋 View Logs', value: 'logs' },
+      new inquirer.Separator(),
+      { name: chalk.gray('Exit'), value: 'exit' },
+    );
+
     const { op } = await inquirer.prompt<{ op: string }>([{
       type: 'list',
       name: 'op',
       message: 'Main Menu:',
-      choices: [
-        { name: '⚡ Provider & API Key', value: 'provider' },
-        { name: '🛠 Coding Tools', value: 'tools' },
-        { name: '🌐 Language', value: 'lang' },
-        new inquirer.Separator(),
-        { name: chalk.gray('Exit (q)'), value: 'exit' },
-      ],
+      choices: mainChoices,
     }]);
 
     if (op === 'exit') {
       console.log(chalk.gray('\n  Goodbye!\n'));
-      keyboardHandler.disable();
       return;
     }
 
     try {
-      if (op === 'provider') {
+      if (op === 'quick') {
+        await launchTool(lastTool!);
+      } else if (op === 'quick_new') {
+        await launchTool(lastTool!, 'new');
+      } else if (op === 'quick_same') {
+        await launchTool(lastTool!, 'same');
+      } else if (op === 'provider') {
         await providerMenu();
       } else if (op === 'tools') {
         await toolSelectMenu();
+      } else if (op === 'doctor') {
+        await diagnosticsMenu();
+      } else if (op === 'logs') {
+        await logsMenu();
       } else if (op === 'lang') {
         const { lang } = await inquirer.prompt<{ lang: 'zh_CN' | 'en_US' }>([{
           type: 'list',

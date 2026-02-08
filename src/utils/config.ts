@@ -27,6 +27,7 @@ export interface ProviderConfig {
 export interface Config {
   lang: 'zh_CN' | 'en_US';
   plan?: Plan;
+  last_used_tool?: string;
   // Legacy (migrated on load)
   api_key?: string;
 
@@ -334,6 +335,15 @@ export class ConfigManager {
 
   setLang(lang: 'zh_CN' | 'en_US') {
     this.config.lang = lang;
+    this.save();
+  }
+
+  getLastUsedTool(): string | undefined {
+    return this.config.last_used_tool;
+  }
+
+  setLastUsedTool(tool: string) {
+    this.config.last_used_tool = tool;
     this.save();
   }
 

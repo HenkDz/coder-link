@@ -4,12 +4,13 @@ A CLI that links coding tools to models from multiple providers.
 
 ## Features
 
-- **Multi-Provider Support**: Works with GLM Coding Plan (Global/China) and Kimi 2.5
+- **Multi-Provider Support**: GLM Coding Plan (Global/China), Kimi 2.5, OpenRouter, and NVIDIA
 - **Interactive Wizard**: Friendly onboarding guidance on first launch
 - **Tool Management**: Automatically configures CLI tools with your API credentials
 - **MCP Configuration**: Easily manage Model Context Protocol services
 - **Local Storage**: All settings stored securely on your machine
 - **Internationalization**: Chinese and English bilingual interface
+- **Status & Health Check**: View current configuration and diagnose issues quickly
 
 ## Supported Coding Tools
 
@@ -18,6 +19,8 @@ A CLI that links coding tools to models from multiple providers.
 - Crush
 - Factory Droid
 - Kimi (native)
+- AMP Code
+- Pi CLI
 
 ## Quick Start
 
@@ -40,16 +43,16 @@ coder-link
 
 ### Complete the Wizard
 
-Once you enter the wizard UI, use the Up/Down arrow keys to navigate and press Enter to confirm each action, following the guided initialization flow.
+Once you enter the wizard UI, use Up/Down arrow keys to navigate and press Enter to confirm each action, following the guided initialization flow.
 
 The wizard will help you complete:
 
-1. Selecting the UI language
-2. Choosing the provider (GLM Coding Plan Global/China or Kimi 2.5)
-3. Entering your API key
-4. Selecting the tools to manage
-5. Automatically configuring tools
-6. Managing MCP services (optional)
+1. **Select UI language** (English or Chinese)
+2. **Choose a provider** (GLM Coding Plan Global/China, Kimi 2.5, OpenRouter, or NVIDIA)
+3. **Enter your API key**
+4. **Select tools to manage**
+5. **Automatically configure selected tools**
+6. **Manage MCP services** (optional)
 
 ## Command List
 
@@ -80,13 +83,15 @@ coder-link lang --help            # Show help for language commands
 
 ### API key management
 ```bash
-coder-link auth                   # Interactively set the key
-coder-link auth glm_coding_plan_global <token>    # Choose Global plan and set the key
-coder-link auth glm_coding_plan_china <token>     # Choose China plan and set the key
-coder-link auth kimi <token>                       # Set Kimi API key
-coder-link auth revoke            # Delete the saved key
-coder-link auth reload <tool>     # Load the latest config into a tool
-coder-link auth --help            # Show help for auth commands
+coder-link auth                              # Interactively set key
+ncoder-link auth glm_coding_plan_global <token>   # Choose Global plan and set key
+ncoder-link auth glm_coding_plan_china <token>   # Choose China plan and set key
+ncoder-link auth kimi <token>                    # Set Kimi API key
+ncoder-link auth openrouter <token>              # Set OpenRouter API key
+ncoder-link auth nvidia <token>                 # Set NVIDIA API key
+ncoder-link auth revoke                       # Delete the saved key
+ncoder-link auth reload <tool>                # Reload config into a tool
+ncoder-link auth --help                        # Show help for auth commands
 ```
 
 ### Tool management
@@ -131,10 +136,15 @@ api_key: your-api-key-here     # API key
 - **Models**: GLM-4.7, GLM-4.6, GLM-4.5-air
 - Get your API key from [Z.AI Open Platform](https://z.ai/model-api)
 
-### Kimi 2.5
-- **Base URL**: `https://api.moonshot.ai/v1`
-- **Models**: kimi-k2.5, kimi-k2-thinking, kimi-k2-0711-preview, etc.
-- Get your API key from [Moonshot AI](https://platform.moonshot.ai/)
+### OpenRouter
+- **Base URL**: `https://openrouter.ai/api/v1`
+- **Models**: Various LLMs including Claude, GPT, and more
+- Get your API key from [OpenRouter.ai](https://openrouter.ai/keys)
+
+### NVIDIA
+- **Base URL**: Via NVIDIA's API gateway
+- **Models**: Various NVIDIA-hosted models
+- Sign up for access at [NVIDIA's developer portal](https://developer.nvidia.com/)
 
 ## How It Works
 
@@ -165,20 +175,20 @@ You can also install custom MCP services through the tool's own marketplace (Cla
 
 ```bash
 # Clone the repository
-git clone https://github.com/z-ai-org/coding-helper.git
-cd coding-helper
+git clone https://github.com/HenkDz/coder-link.git
+cd coder-link
 
 # Install dependencies
-npm install
+bun install
 
 # Build
-npm run build
+bun run build
 
 # Run in development mode
-npm run dev
+bun run dev
 
 # Lint
-npm run lint
+bun run lint
 ```
 
 ## Contributing
