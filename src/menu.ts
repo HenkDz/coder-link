@@ -685,69 +685,88 @@ async function toolMenu(tool: string): Promise<void> {
     printNavigationHints();
 
     // Build dynamic choices
-    type ToolAction = 'switch_profile' | 'sync_global' | 'change_model' | 'unload' | 'mcp' | 'start' | 'start_new' | 'start_same' | '__back';
+    type ToolAction = 'quick_launch' | 'sync_global' | 'switch_profile' | 'change_model' | 'unload' | 'mcp' | 'start' | 'start_new' | 'start_same' | '__back';
     const choices: Array<{ name: string; value: ToolAction } | inquirer.Separator> = [];
 
-    choices.push({ name: '🔌 Connect to Provider (Switch Profile)', value: 'switch_profile' });
+    const lastTool = configManager.getLastUsedTool();
+    const { cmd } = startCommand(tool);
+    const installed = commandExists(cmd);
 
+    // Quick launch at top if this is the last used tool
+    if (lastTool === tool && installed) {
+      if (process.platform === 'win32') {
+        choices.push({ name: `🚀 Quick Launch ${toolLabel(tool)} (This Terminal)`, value: 'start_same' });
+      } else {
+        choices.push({ name: `🚀 Quick Launch ${toolLabel(tool)}`, value: 'start' });
+      }
+      choices.push(new inquirer.Separator());
+    }
+
+    // Sync with Global (first provider option)
     if (hasProvider) {
       const globalIncompat = getProviderIncompatibility(tool, chelperPlan as Plan);
-      
+
       if (globalIncompat) {
         // Global provider is incompatible with this tool
-        choices.push({ 
-          name: chalk.gray(`🌐 Use Global Default (${planLabel(chelperPlan as Plan)}) ${chalk.red(`— ${globalIncompat}`)}`), 
-          value: 'sync_global' 
+        choices.push({
+          name: chalk.gray(`🌐 Sync with Global (${planLabel(chelperPlan as Plan)}) ${chalk.red(`— ${globalIncompat}`)}`),
+          value: 'sync_global'
         });
       } else if (matchesGlobal) {
-        choices.push({ 
-          name: chalk.gray(`🌐 Sync with Global (already using ${planLabel(chelperPlan as Plan)})`), 
-          value: 'sync_global' 
+        choices.push({
+          name: chalk.gray(`🌐 Sync with Global (${planLabel(chelperPlan as Plan)}) ✓`),
+          value: 'sync_global'
         });
       } else {
-        choices.push({ 
-          name: `🌐 Use Global Default (${planLabel(chelperPlan as Plan)})`, 
-          value: 'sync_global' 
+        choices.push({
+          name: `🌐 Sync with Global (${planLabel(chelperPlan as Plan)})`,
+          value: 'sync_global'
         });
       }
     }
 
+    // Connect to Provider (Switch Profile)
+    choices.push({ name: '🔌 Connect to Provider (Switch Profile)', value: 'switch_profile' });
+
+    // Change Model ID
     if (isConfigured && toolPlan) {
-      choices.push({ name: '🧪 Change Model ID (Override)', value: 'change_model' });
+      choices.push({ name: '🧪 Change Model ID', value: 'change_model' });
     }
 
+    // Unload Configuration
     if (isConfigured) {
-      choices.push({ name: '🗑  Unload Configuration (remove from tool)', value: 'unload' });
+      choices.push({ name: '🗑  Unload Configuration', value: 'unload' });
     }
 
     choices.push(new inquirer.Separator());
     choices.push({ name: '🔌 MCP Servers', value: 'mcp' });
 
-    // Start
-    const { cmd } = startCommand(tool);
-    const installed = commandExists(cmd);
-    
     // Show detection status inline
     if (!installed) {
       printWarning(`${toolLabel(tool)} was not detected on PATH`, installHint(tool).command ? `Install: ${installHint(tool).command}` : 'Please install it using the vendor instructions.');
     }
-    
-    if (process.platform === 'win32') {
-      choices.push({ 
-        name: installed ? `🚀 Launch ${toolLabel(tool)} (New Window)` : chalk.yellow(`🚀 Launch ${toolLabel(tool)} (New Window - not detected)`), 
-        value: 'start_new',
-      });
-      choices.push({ 
-        name: installed ? `🚀 Launch ${toolLabel(tool)} (This Terminal)` : chalk.yellow(`🚀 Launch ${toolLabel(tool)} (This Terminal - not detected)`), 
-        value: 'start_same',
-      });
-    } else {
-      choices.push({ 
-        name: installed ? `🚀 Launch ${toolLabel(tool)}` : chalk.yellow(`🚀 Launch ${toolLabel(tool)} (not detected)`), 
-        value: 'start',
-      });
+
+    // Launch options (only add if not shown as quick launch at top)
+    if (lastTool !== tool || !installed) {
+      choices.push(new inquirer.Separator());
+
+      if (process.platform === 'win32') {
+        choices.push({
+          name: installed ? `🚀 Launch ${toolLabel(tool)} (New Window)` : chalk.yellow(`🚀 Launch ${toolLabel(tool)} (New Window - not detected)`),
+          value: 'start_new',
+        });
+        choices.push({
+          name: installed ? `🚀 Launch ${toolLabel(tool)} (This Terminal)` : chalk.yellow(`🚀 Launch ${toolLabel(tool)} (This Terminal - not detected)`),
+          value: 'start_same',
+        });
+      } else {
+        choices.push({
+          name: installed ? `🚀 Launch ${toolLabel(tool)}` : chalk.yellow(`🚀 Launch ${toolLabel(tool)} (not detected)`),
+          value: 'start',
+        });
+      }
     }
-    
+
     choices.push(new inquirer.Separator());
     choices.push({ name: chalk.gray('← Back'), value: '__back' });
 
@@ -1221,22 +1240,7 @@ export async function runMenu(): Promise<void> {
     printStatusBar(auth.plan, auth.apiKey, auth.plan ? providerSummary(auth.plan as Plan).trim() : undefined);
     printNavigationHints();
 
-    const lastTool = configManager.getLastUsedTool();
     const mainChoices: any[] = [];
-
-    if (lastTool) {
-      const { cmd } = startCommand(lastTool);
-      const installed = commandExists(cmd);
-      if (installed) {
-        if (process.platform === 'win32') {
-          mainChoices.push({ name: `🚀 Quick Launch: ${toolLabel(lastTool)} (New)`, value: 'quick_new' });
-          mainChoices.push({ name: `🚀 Quick Launch: ${toolLabel(lastTool)} (Same)`, value: 'quick_same' });
-        } else {
-          mainChoices.push({ name: `🚀 Quick Launch: ${toolLabel(lastTool)}`, value: 'quick' });
-        }
-        mainChoices.push(new inquirer.Separator());
-      }
-    }
 
     mainChoices.push(
       { name: '⚡ Provider & API Key', value: 'provider' },
@@ -1262,13 +1266,7 @@ export async function runMenu(): Promise<void> {
     }
 
     try {
-      if (op === 'quick') {
-        await launchTool(lastTool!);
-      } else if (op === 'quick_new') {
-        await launchTool(lastTool!, 'new');
-      } else if (op === 'quick_same') {
-        await launchTool(lastTool!, 'same');
-      } else if (op === 'provider') {
+      if (op === 'provider') {
         await providerMenu();
       } else if (op === 'tools') {
         await toolSelectMenu();
