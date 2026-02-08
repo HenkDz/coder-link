@@ -1,6 +1,6 @@
 {
   "name": "coder-link",
-  "version": "0.0.8",
+  "version": "0.0.9",
   "description": "Coder Link: connect coding tools to any model/provider",
   "main": "dist/index.js",
   "bin": {
@@ -9,9 +9,7 @@
   "type": "module",
   "files": [
     "dist",
-    "README.md",
-    "LICENSE",
-    "zai-coding-plugins"
+    "README.md"
   ],
   "engines": {
     "node": ">=18.0.0"
@@ -41,7 +39,8 @@
     "kimi",
     "glm"
   ],
-  "author": "Z.AI",
+  "author": "henkey",
+  "license": "MIT",
   "dependencies": {
     "@iarna/toml": "^2.2.5",
     "chalk": "^5.3.0",

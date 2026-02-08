@@ -31,4 +31,4 @@ test_*.py
 __pycache__/
 
 # Misc
-*.tsbuildinfo
+*.tsbuildinfo.npmrc
