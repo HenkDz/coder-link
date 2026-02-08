@@ -34,10 +34,17 @@ A CLI that links coding tools to models from multiple providers.
 npx coder-link
 ```
 
-#### Option 2: Install globally
+#### Option 2: Install globally with npm
 
 ```bash
 npm install -g coder-link
+coder-link
+```
+
+#### Option 3: Install globally with bun
+
+```bash
+bun add -g coder-link
 coder-link
 ```
 
@@ -84,14 +91,14 @@ coder-link lang --help            # Show help for language commands
 ### API key management
 ```bash
 coder-link auth                              # Interactively set key
-ncoder-link auth glm_coding_plan_global <token>   # Choose Global plan and set key
-ncoder-link auth glm_coding_plan_china <token>   # Choose China plan and set key
-ncoder-link auth kimi <token>                    # Set Kimi API key
-ncoder-link auth openrouter <token>              # Set OpenRouter API key
-ncoder-link auth nvidia <token>                 # Set NVIDIA API key
-ncoder-link auth revoke                       # Delete the saved key
-ncoder-link auth reload <tool>                # Reload config into a tool
-ncoder-link auth --help                        # Show help for auth commands
+coder-link auth glm_coding_plan_global <token>   # Choose Global plan and set key
+coder-link auth glm_coding_plan_china <token>   # Choose China plan and set key
+coder-link auth kimi <token>                    # Set Kimi API key
+coder-link auth openrouter <token>              # Set OpenRouter API key
+coder-link auth nvidia <token>                 # Set NVIDIA API key
+coder-link auth revoke                       # Delete the saved key
+coder-link auth reload <tool>                # Reload config into a tool
+coder-link auth --help                        # Show help for auth commands
 ```
 
 ### Tool management
@@ -197,4 +204,4 @@ We welcome contributions! Please feel free to submit issues or pull requests.
 
 ## License
 
-Apache License 2.0
+MIT
