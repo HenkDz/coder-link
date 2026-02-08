@@ -5,15 +5,15 @@ import { fileURLToPath } from 'url';
 
 // ── Branded ASCII art ──────────────────────────────────────────────────
 const LOGO_LINES = [
-  ' ██████╗██╗  ██╗███████╗██╗      ██████╗ ███████╗██████╗ ',
-  '██╔════╝██║  ██║██╔════╝██║     ██╔═══██╗██╔════╝██╔══██╗',
-  '██║     ███████║█████╗  ██║     ██║   ██║█████╗  ██████╔╝',
-  '██║     ██╔══██║██╔══╝  ██║     ██║   ██║██╔══╝  ██╔══██╗',
-  '╚██████╗██║  ██║███████╗███████╗╚██████╔╝███████╗██║  ██║',
-  ' ╚═════╝╚═╝  ╚═╝╚══════╝╚══════╝ ╚═════╝ ╚══════╝╚═╝  ╚═╝',
+  ' ██████╗  ██████╗ ██████╗ ███████╗██████╗ ██╗     ██╗███╗   ██╗██╗  ██╗',
+  '██╔════╝ ██╔═══██╗██╔══██╗██╔════╝██╔══██╗██║     ██║████╗  ██║██║ ██╔╝',
+  '██║      ██║   ██║██║  ██║█████╗  ██████╔╝██║     ██║██╔██╗ ██║█████╔╝ ',
+  '██║      ██║   ██║██║  ██║██╔══╝  ██╔══██╗██║     ██║██║╚██╗██║██╔═██╗ ',
+  '╚██████╗ ╚██████╔╝██████╔╝███████╗██║  ██║███████╗██║██║ ╚████║██║  ██╗',
+  ' ╚═════╝  ╚═════╝ ╚══════╝╚══════╝╚═╝  ╚═╝╚══════╝╚═╝╚═╝  ╚═══╝╚═╝  ╚═╝',
 ];
 
-const TAGLINE = 'The Ultimate Coding Tool Manager';
+const TAGLINE = 'CoderLink: Connect coding tools to any model/provider';
 
 function getVersion(): string {
   try {
@@ -99,11 +99,13 @@ export function truncateForTerminal(text: string, maxWidth?: number): string {
  * Includes config path and navigation hints.
  */
 export function printStatusBar(plan: string | undefined, apiKey: string | undefined, extra?: string): void {
-  const provider = plan ? planLabelColored(plan) : chalk.yellow('Not configured');
-  const key = apiKey?.trim() ? chalk.green(`${apiKey.trim().slice(0, 4)}****`) : chalk.yellow('Not set');
+  const provider = plan ? planLabelColored(plan) : chalk.yellow('○ Not configured');
+  const keyStatus = apiKey?.trim() ? chalk.green('● Active') : chalk.gray('○ Missing');
+  const keyDisplay = apiKey?.trim() ? chalk.cyan(`${apiKey.trim().slice(0, 4)}****`) : chalk.gray('N/A');
+  
   const parts = [
     `${chalk.gray('Provider:')} ${provider}`,
-    `${chalk.gray('API Key:')} ${key}`,
+    `${chalk.gray('Key:')} ${keyStatus} ${chalk.gray('(')}${keyDisplay}${chalk.gray(')')}`,
   ];
   if (extra) parts.push(extra);
   console.log(`  ${parts.join(` ${chalk.gray('│')} `)}`);
@@ -114,7 +116,7 @@ export function printStatusBar(plan: string | undefined, apiKey: string | undefi
  * Print navigation hints at the bottom of menus
  */
 export function printNavigationHints(): void {
-  console.log(chalk.gray('  q: Quit  │  Esc: Back  │  ↑↓: Navigate  │  Enter: Select'));
+  console.log(chalk.gray('  Ctrl+C: Quit  │  ↑↓: Navigate  │  Enter: Select'));
   console.log();
 }
 
