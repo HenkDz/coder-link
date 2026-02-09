@@ -193,7 +193,7 @@ const PROVIDER_CHOICES: Array<{ name: string; value: Plan }> = [
 
 const COMMON_MODELS: Record<string, string[]> = {
   kimi: ['moonshot-ai/kimi-k2.5', 'moonshot-ai/kimi-k2-thinking'],
-  openrouter: ['moonshotai/kimi-k2.5', 'anthropic/claude-opus-4.6','poney-alpha', 'qwen/qwen3-coder-next'],
+  openrouter: ['openrouter/pony-alpha', 'anthropic/claude-opus-4.6', 'qwen/qwen3-coder-next'],
   nvidia: ['moonshotai/kimi-k2.5', 'deepseek-ai/deepseek-v3.2', 'meta/llama-3.3-70b-instruct', 'meta/llama-4-maverick-17b-128e-instruct', 'qwen/qwen3-coder-480b-a35b-instruct', 'z-ai/glm4.7', 'nvidia/llama-3.3-nemotron-super-49b-v1.5'],
   lmstudio: ['lmstudio-community', 'deepseek-coder-v3', 'codellama/13b', 'mistral-7b-instruct', 'qwen2.5-coder-7b'],
   glm_coding_plan_global: ['glm-4.7', 'glm-4-coder', 'glm-4-plus', 'glm-4-air', 'glm-4-flash'],

@@ -15,6 +15,12 @@ import type { ProviderOptions } from './tool-manager.js';
  * Claude Code constructs API URLs by appending /v1/messages to ANTHROPIC_BASE_URL.
  * So the base URL should NOT include /v1 or the messages path.
  * 
+ * Model Configuration (via environment variables):
+ * - ANTHROPIC_DEFAULT_OPUS_MODEL: Model for opus tier
+ * - ANTHROPIC_DEFAULT_SONNET_MODEL: Model for sonnet tier (default)
+ * - ANTHROPIC_DEFAULT_HAIKU_MODEL: Model for haiku tier / background tasks
+ * - CLAUDE_CODE_SUBAGENT_MODEL: Model for subagents
+ * 
  * Supported providers:
  * - GLM Coding Plan (Global): https://api.z.ai/api/anthropic → calls /api/anthropic/v1/messages
  * - GLM Coding Plan (China): https://open.bigmodel.cn/api/anthropic → calls /api/anthropic/v1/messages
@@ -112,6 +118,10 @@ export class ClaudeCodeManager {
     // It appends /v1/messages to ANTHROPIC_BASE_URL, so base URL should NOT include /v1
     let baseUrl: string;
     
+    // Default models for each provider (opus, sonnet, haiku)
+    // These can be overridden by options.model
+    let defaultModels: { opus: string; sonnet: string; haiku: string };
+    
     if (plan === 'kimi') {
       // Kimi/Moonshot only provides OpenAI-compatible API (/v1/chat/completions)
       // They do NOT support Anthropic's /v1/messages endpoint
@@ -126,6 +136,12 @@ export class ClaudeCodeManager {
       // OpenRouter supports Anthropic format at /api/v1/messages when base is /api
       // Claude Code appends /v1/messages, so: openrouter.ai/api + /v1/messages = /api/v1/messages
       baseUrl = 'https://openrouter.ai/api';
+      // OpenRouter Claude models
+      defaultModels = {
+        opus: 'anthropic/claude-opus-4.5',
+        sonnet: 'anthropic/claude-sonnet-4.5',
+        haiku: 'anthropic/claude-haiku-4.5'
+      };
     } else if (plan === 'nvidia') {
       // NVIDIA NIM only provides OpenAI-compatible API
       throw new Error(
@@ -136,15 +152,61 @@ export class ClaudeCodeManager {
     } else if (plan === 'glm_coding_plan_global') {
       // GLM Coding Plan Global - use Anthropic-compatible endpoint (NOT the OpenAI endpoint from profile)
       baseUrl = 'https://api.z.ai/api/anthropic';
+      // GLM models per Z.AI docs: https://docs.z.ai/scenario-example/develop-tools/claude
+      defaultModels = {
+        opus: 'glm-4.7',
+        sonnet: 'glm-4.7',
+        haiku: 'glm-4.5-air'
+      };
     } else if (plan === 'glm_coding_plan_china') {
       // GLM Coding Plan China - use Anthropic-compatible endpoint (NOT the OpenAI endpoint from profile)
       baseUrl = 'https://open.bigmodel.cn/api/anthropic';
+      // GLM models per Z.AI docs
+      defaultModels = {
+        opus: 'glm-4.7',
+        sonnet: 'glm-4.7',
+        haiku: 'glm-4.5-air'
+      };
     } else if (options?.baseUrl?.trim()) {
       // Custom/unknown provider - use provided URL as-is
       baseUrl = options.baseUrl.trim();
+      // Use provided model or fallback
+      const customModel = options?.model || 'claude-sonnet-4-5-20250929';
+      defaultModels = {
+        opus: customModel,
+        sonnet: customModel,
+        haiku: customModel
+      };
     } else {
       // Fallback (should not reach here for known plans)
       baseUrl = 'https://api.z.ai/api/anthropic';
+      defaultModels = {
+        opus: 'glm-4.7',
+        sonnet: 'glm-4.7',
+        haiku: 'glm-4.5-air'
+      };
+    }
+
+    // If user specified a model, use it for opus/sonnet
+    // Note: For OpenRouter, we keep haiku as a known Anthropic model because
+    // Claude Code validates haiku more strictly for background tasks
+    if (options?.model?.trim()) {
+      const model = options.model.trim();
+      if (plan === 'openrouter') {
+        // OpenRouter: preserve haiku as Anthropic model, use custom model for opus/sonnet
+        defaultModels = {
+          opus: model,
+          sonnet: model,
+          haiku: 'anthropic/claude-haiku-4.5'  // Keep Anthropic model for background tasks
+        };
+      } else {
+        // Other providers: use custom model for all three
+        defaultModels = {
+          opus: model,
+          sonnet: model,
+          haiku: model
+        };
+      }
     }
 
     const newConfig = {
@@ -153,6 +215,12 @@ export class ClaudeCodeManager {
         ...cleanedEnv,
         ANTHROPIC_AUTH_TOKEN: apiKey,
         ANTHROPIC_BASE_URL: baseUrl,
+        // Model configuration - set all three tiers
+        ANTHROPIC_DEFAULT_OPUS_MODEL: defaultModels.opus,
+        ANTHROPIC_DEFAULT_SONNET_MODEL: defaultModels.sonnet,
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: defaultModels.haiku,
+        // Subagents use sonnet by default
+        CLAUDE_CODE_SUBAGENT_MODEL: defaultModels.sonnet,
         API_TIMEOUT_MS: '3000000',
         CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: 1
       }
@@ -166,13 +234,23 @@ export class ClaudeCodeManager {
     if (!currentSettings.env) {
       return;
     }
-    // 删除 GLM Coding Plan 和 Kimi 相关的环境变量
-    const { ANTHROPIC_AUTH_TOKEN: _1, ANTHROPIC_BASE_URL: _2, API_TIMEOUT_MS: _3, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: _4, ...otherEnv } = currentSettings.env;
+    // Remove all Claude Code related environment variables
+    const { 
+      ANTHROPIC_AUTH_TOKEN: _1, 
+      ANTHROPIC_BASE_URL: _2, 
+      API_TIMEOUT_MS: _3, 
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: _4,
+      ANTHROPIC_DEFAULT_OPUS_MODEL: _5,
+      ANTHROPIC_DEFAULT_SONNET_MODEL: _6,
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: _7,
+      CLAUDE_CODE_SUBAGENT_MODEL: _8,
+      ...otherEnv 
+    } = currentSettings.env;
     const newSettings = {
       ...currentSettings,
       env: otherEnv
     };
-    // 如果 env 为空对象，则删除 env 字段
+    // If env is empty object, delete the field
     if (newSettings.env && Object.keys(newSettings.env).length === 0) {
       delete newSettings.env;
     }
@@ -208,8 +286,11 @@ export class ClaudeCodeManager {
         plan = 'kimi';
       }
       
-      // Claude Code doesn't store model in settings, it's configured at runtime
-      return { plan, apiKey, model: undefined };
+      // Return the sonnet model as the primary model (used for display)
+      // Claude Code uses sonnet as the default
+      const model = settings.env.ANTHROPIC_DEFAULT_SONNET_MODEL;
+      
+      return { plan, apiKey, model };
     } catch {
       return { plan: null, apiKey: null };
     }
