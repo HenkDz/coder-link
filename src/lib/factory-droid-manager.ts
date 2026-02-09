@@ -97,6 +97,9 @@ export class FactoryDroidManager {
   }
 
   private getDisplayName(plan: string, protocol: 'anthropic' | 'openai', options?: ProviderOptions): string {
+    const targetModel = options?.model?.trim() || (plan === 'kimi' ? 'moonshotai/kimi-k2.5' : 'glm-4-coder');
+    const modelName = this.extractModelName(targetModel);
+    
     // For kimi-like providers, use the actual source for the display name
     if (plan === 'kimi' || plan === 'openrouter' || plan === 'nvidia') {
       const source = (options?.source || '').toString().trim().toLowerCase();
@@ -104,11 +107,11 @@ export class FactoryDroidManager {
         : source === 'nvidia' ? 'NVIDIA NIM' 
         : 'Kimi';
       const protocolName = protocol === 'anthropic' ? 'Anthropic' : 'OpenAI';
-      return `${providerName} - ${protocolName}`;
+      return `${providerName} - ${modelName} [${protocolName}]`;
     }
     const planName = plan === 'glm_coding_plan_global' ? 'GLM Coding Plan Global' : 'GLM Coding Plan China';
     const protocolName = protocol === 'anthropic' ? 'Anthropic' : 'OpenAI';
-    return `${planName} - ${protocolName}`;
+    return `${planName} - ${modelName} [${protocolName}]`;
   }
 
   private toCustomModelId(displayName: string, index: number): string {
@@ -116,6 +119,14 @@ export class FactoryDroidManager {
       .trim()
       .replace(/\s/g, '-');
     return `custom:${slug}-${index}`;
+  }
+
+  private extractModelName(modelId: string): string {
+    const parts = modelId.split('/');
+    if (parts.length > 1) {
+      return parts[parts.length - 1];
+    }
+    return modelId;
   }
 
   async loadConfig(plan: string, apiKey: string, options?: ProviderOptions): Promise<void> {
@@ -142,8 +153,10 @@ export class FactoryDroidManager {
       // Only the native Moonshot API supports extended thinking / reasoning mode.
       const supportsThinking = (source === '' || source === 'moonshot');
       const displayName = this.getDisplayName(plan, 'openai', options);
+      const modelName = this.extractModelName(targetModel);
       const openaiModel: Record<string, any> = {
         displayName,
+        name: modelName,
         model: targetModel,
         baseUrl: baseUrl,
         apiKey,
@@ -178,8 +191,10 @@ export class FactoryDroidManager {
     }
 
     // Create Anthropic protocol configuration
+    const modelName = this.extractModelName(targetModel);
     const anthropicModel = {
       displayName: this.getDisplayName(plan, 'anthropic', options),
+      name: modelName,
       model: targetModel,
       baseUrl: this.getBaseUrl(plan, 'anthropic', options),
       apiKey,
@@ -190,6 +205,7 @@ export class FactoryDroidManager {
     // Create OpenAI Chat Completion protocol configuration
     const openaiModel = {
       displayName: this.getDisplayName(plan, 'openai', options),
+      name: modelName,
       model: targetModel,
       baseUrl: this.getBaseUrl(plan, 'openai', options),
       apiKey,
