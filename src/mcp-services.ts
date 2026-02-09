@@ -23,5 +23,52 @@ export const BUILTIN_MCP_SERVICES: MCPService[] = [
       glm_coding_plan_china: { GITHUB_TOKEN: '' },
       kimi: { GITHUB_TOKEN: '' }
     }
+  },
+  // Z AI MCP Servers (GLM API)
+  {
+    id: 'zai-mcp-server',
+    name: 'Z AI MCP Server',
+    description: 'Z AI unified MCP server with multiple tools',
+    protocol: 'stdio',
+    command: 'npx',
+    args: ['-y', '@z_ai/mcp-server'],
+    requiresAuth: true,
+    envTemplate: {
+      glm_coding_plan_global: { Z_AI_MODE: 'ZAI', Z_AI_API_KEY: '' },
+      glm_coding_plan_china: { Z_AI_MODE: 'ZAI', Z_AI_API_KEY: '' }
+    }
+  },
+  {
+    id: 'web-search-prime',
+    name: 'Web Search Prime',
+    description: 'Z AI web search service',
+    protocol: 'streamable-http',
+    urlTemplate: {
+      glm_coding_plan_global: 'https://api.z.ai/api/mcp/web_search_prime/mcp',
+      glm_coding_plan_china: 'https://open.bigmodel.cn/api/mcp/web_search_prime/mcp'
+    },
+    requiresAuth: true
+  },
+  {
+    id: 'web-reader',
+    name: 'Web Reader',
+    description: 'Z AI web content reader service',
+    protocol: 'streamable-http',
+    urlTemplate: {
+      glm_coding_plan_global: 'https://api.z.ai/api/mcp/web_reader/mcp',
+      glm_coding_plan_china: 'https://open.bigmodel.cn/api/mcp/web_reader/mcp'
+    },
+    requiresAuth: true
+  },
+  {
+    id: 'zread',
+    name: 'Z Read',
+    description: 'Z AI reading assistant service',
+    protocol: 'streamable-http',
+    urlTemplate: {
+      glm_coding_plan_global: 'https://api.z.ai/api/mcp/zread/mcp',
+      glm_coding_plan_china: 'https://open.bigmodel.cn/api/mcp/zread/mcp'
+    },
+    requiresAuth: true
   }
 ];

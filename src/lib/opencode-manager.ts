@@ -51,11 +51,47 @@ export class OpenCodeManager {
   }
 
   private getProviderName(plan: string): string {
-    // All kimi-like providers (kimi, openrouter, nvidia) use the moonshot-ai-coding provider
-    if (plan === 'kimi' || plan === 'openrouter' || plan === 'nvidia') {
-      return 'moonshot-ai-coding';
-    }
-    return plan === 'glm_coding_plan_global' ? 'zai-coding-plan' : 'zhipuai-coding-plan';
+    // GLM providers use special provider IDs
+    if (plan === 'glm_coding_plan_global') return 'zai-coding-plan';
+    if (plan === 'glm_coding_plan_china') return 'zhipuai-coding-plan';
+    // Kimi uses moonshot-ai-coding provider
+    if (plan === 'kimi') return 'moonshot-ai-coding';
+    // OpenRouter, NVIDIA, LM Studio and other OpenAI-compatible providers use their plan name as provider ID
+    return plan;
+  }
+
+  private isCustomProvider(plan: string): boolean {
+    // Custom providers (OpenAI-compatible) need full configuration with npm, name, options, models
+    // This includes NVIDIA, OpenRouter, LM Studio - any provider using @ai-sdk/openai-compatible
+    return plan === 'nvidia' || plan === 'openrouter' || plan === 'lmstudio';
+  }
+
+  private getProviderDisplayName(plan: string): string {
+    const names: Record<string, string> = {
+      nvidia: 'NVIDIA NIM',
+      openrouter: 'OpenRouter',
+      lmstudio: 'LM Studio (local)',
+      kimi: 'Moonshot AI'
+    };
+    return names[plan] || 'Custom Provider';
+  }
+
+  private getDefaultBaseUrl(plan: string): string {
+    const urls: Record<string, string> = {
+      nvidia: 'https://integrate.api.nvidia.com/v1',
+      openrouter: 'https://openrouter.ai/api/v1',
+      lmstudio: 'http://localhost:1234/v1'
+    };
+    return urls[plan] || 'http://localhost:1234/v1';
+  }
+
+  private getDefaultModel(plan: string): string {
+    const models: Record<string, string> = {
+      nvidia: 'moonshotai/kimi-k2.5',
+      openrouter: 'kimi-k2.5',
+      lmstudio: 'lmstudio-community'
+    };
+    return models[plan] || 'default-model';
   }
 
   async loadConfig(plan: string, apiKey: string, options?: ProviderOptions): Promise<void> {
@@ -63,13 +99,16 @@ export class OpenCodeManager {
     const providerName = this.getProviderName(plan);
 
     // Remove old provider configuration (if exists)
-    const { provider: oldProvider, ...restConfig } = currentConfig;
+    // Also exclude old model/small_model to ensure they get properly updated
+    const { provider: oldProvider, model: _, small_model: __, ...restConfig } = currentConfig;
     const newProvider: Record<string, any> = {};
 
-    // Keep other providers (if any), but remove old coding-plan provider
+    // Keep other providers (if any), but remove old providers managed by this app
+    // This ensures clean switching between providers
+    const managedProviders = ['zhipuai-coding-plan', 'zai-coding-plan', 'moonshot-ai-coding', 'kimi-custom', 'nvidia', 'openrouter', 'lmstudio'];
     if (oldProvider) {
       for (const [key, value] of Object.entries(oldProvider)) {
-        if (key !== 'zhipuai-coding-plan' && key !== 'zai-coding-plan' && key !== 'moonshot-ai-coding') {
+        if (!managedProviders.includes(key)) {
           newProvider[key] = value;
         }
       }
@@ -80,18 +119,77 @@ export class OpenCodeManager {
     const modelId = options?.model?.trim();
 
     // Add new provider configuration
-    // All kimi-like providers (kimi, openrouter, nvidia) use OpenAI-compatible API
-    if (plan === 'kimi' || plan === 'openrouter' || plan === 'nvidia') {
-      // Only the native Moonshot API supports extended thinking / reasoning mode.
-      const supportsThinking = (source === '' || source === 'moonshot');
+    if (this.isCustomProvider(plan)) {
+      // OpenAI-compatible providers (NVIDIA, OpenRouter, LM Studio) need full custom structure
+      // See: https://opencode.ai/docs/providers/#custom-provider
+      const customBaseUrl = baseUrl || this.getDefaultBaseUrl(plan);
+      const customModelId = modelId || this.getDefaultModel(plan);
+      
       newProvider[providerName] = {
+        npm: '@ai-sdk/openai-compatible',
+        name: this.getProviderDisplayName(plan),
         options: {
           apiKey: apiKey,
-          baseUrl: baseUrl || 'https://api.moonshot.ai/v1',
-          ...(supportsThinking ? {} : { reasoning: false, thinking: false })
+          baseURL: customBaseUrl
+        },
+        models: {
+          [customModelId]: {
+            name: customModelId
+          }
         }
       };
+    } else if (plan === 'kimi') {
+      // Kimi can use either:
+      // 1. Built-in moonshot-ai-coding provider (native Moonshot API)
+      // 2. Custom OpenAI-compatible provider (when using OpenRouter, etc.)
+      const isNativeMoonshot = !baseUrl || baseUrl === 'https://api.moonshot.ai/v1';
+
+      if (isNativeMoonshot) {
+        // Native Moonshot API supports extended thinking / reasoning mode
+        const supportsThinking = (source === '' || source === 'moonshot');
+        newProvider[providerName] = {
+          options: {
+            apiKey: apiKey,
+            baseUrl: baseUrl || 'https://api.moonshot.ai/v1',
+            ...(supportsThinking ? {} : { reasoning: false, thinking: false })
+          }
+        };
+      } else {
+        // Custom baseUrl detected - use OpenAI-compatible format
+        // This handles OpenRouter, proxy URLs, etc.
+        const customProviderName = 'kimi-custom';
+        const customModelId = modelId || 'kimi-k2.5';
+
+        newProvider[customProviderName] = {
+          npm: '@ai-sdk/openai-compatible',
+          name: 'Kimi (Custom Endpoint)',
+          options: {
+            apiKey: apiKey,
+            baseURL: baseUrl
+          },
+          models: {
+            [customModelId]: {
+              name: customModelId
+            }
+          }
+        };
+
+        // Build final model reference for custom provider
+        const customModelRef = customModelId.includes('/') ? customModelId : `${customProviderName}/${customModelId}`;
+
+        const newConfig = {
+          $schema: 'https://opencode.ai/config.json',
+          ...restConfig,
+          provider: newProvider,
+          model: customModelRef,
+          small_model: customModelRef
+        };
+
+        this.saveConfig(newConfig);
+        return; // Early return since we've already saved
+      }
     } else {
+      // GLM Coding Plan providers
       newProvider[providerName] = {
         options: {
           apiKey: apiKey,
@@ -101,12 +199,20 @@ export class OpenCodeManager {
     }
 
     // Default models if not provided
-    const defaultModel = (plan === 'kimi' || plan === 'openrouter' || plan === 'nvidia') 
-      ? 'kimi-k2.5' 
-      : (plan === 'glm_coding_plan_global' ? 'glm-4-coder' : 'glm-4-plus');
+    let defaultModel: string;
+    if (plan === 'kimi' || plan === 'openrouter' || plan === 'nvidia') {
+      defaultModel = 'kimi-k2.5';
+    } else if (plan === 'lmstudio') {
+      defaultModel = 'lmstudio-community';
+    } else if (plan === 'glm_coding_plan_global') {
+      defaultModel = 'glm-4-coder';
+    } else {
+      defaultModel = 'glm-4-plus';
+    }
     const targetModel = modelId || defaultModel;
     
-    // OpenCode model strings are typically "<provider>/<model>". 
+    // OpenCode model strings are typically "<provider>/<model>".
+    // For custom providers, use the model ID directly if it doesn't include a slash
     const modelRef = targetModel.includes('/') ? targetModel : `${providerName}/${targetModel}`;
 
     const newConfig = {
@@ -122,22 +228,25 @@ export class OpenCodeManager {
 
   async unloadConfig(): Promise<void> {
     const currentConfig = this.getConfig();
-    // Remove provider's coding-plan configuration
+    // Remove provider's managed provider configurations
     if (currentConfig.provider) {
-      delete currentConfig.provider['zhipuai-coding-plan'];
-      delete currentConfig.provider['zai-coding-plan'];
-      delete currentConfig.provider['moonshot-ai-coding'];
+      const managedProviders = ['zhipuai-coding-plan', 'zai-coding-plan', 'moonshot-ai-coding', 'nvidia', 'openrouter', 'lmstudio'];
+      for (const providerKey of managedProviders) {
+        delete currentConfig.provider[providerKey];
+      }
       // If provider is empty, delete provider field
       if (Object.keys(currentConfig.provider).length === 0) {
         delete currentConfig.provider;
       }
     }
 
-    // Remove model and small_model (if they are coding-plan)
-    if (currentConfig.model?.includes('coding-plan') || currentConfig.model?.includes('moonshot-ai-coding')) {
+    // Remove model and small_model (if they are managed providers)
+    const managedProviderIds = ['coding-plan', 'moonshot-ai-coding', 'kimi-custom', 'nvidia', 'openrouter', 'lmstudio'];
+    const isManagedModel = (m: string) => managedProviderIds.some(id => m.includes(id));
+    if (currentConfig.model && isManagedModel(currentConfig.model)) {
       delete currentConfig.model;
     }
-    if (currentConfig.small_model?.includes('coding-plan') || currentConfig.small_model?.includes('moonshot-ai-coding')) {
+    if (currentConfig.small_model && isManagedModel(currentConfig.small_model)) {
       delete currentConfig.small_model;
     }
 
@@ -163,14 +272,56 @@ export class OpenCodeManager {
         plan = 'glm_coding_plan_china';
         apiKey = config.provider['zhipuai-coding-plan'].options?.apiKey || null;
       } else if (config.provider['moonshot-ai-coding']) {
+        // Kimi native provider
+        plan = 'kimi';
         apiKey = config.provider['moonshot-ai-coding'].options?.apiKey || null;
-        const baseUrl = config.provider['moonshot-ai-coding'].options?.baseUrl || '';
-        if (baseUrl.includes('openrouter.ai')) {
-          plan = 'openrouter';
-        } else if (baseUrl.includes('nvidia.com')) {
-          plan = 'nvidia';
-        } else {
-          plan = 'kimi';
+      } else if (config.provider['kimi-custom']) {
+        // Kimi custom provider (OpenRouter or other endpoints)
+        plan = 'kimi';
+        apiKey = config.provider['kimi-custom'].options?.apiKey || null;
+        // Extract model from the models field if available
+        const models = config.provider['kimi-custom'].models;
+        if (models && typeof models === 'object') {
+          const modelIds = Object.keys(models);
+          if (modelIds.length > 0) {
+            model = modelIds[0];
+          }
+        }
+      } else if (config.provider['nvidia']) {
+        // NVIDIA custom provider
+        plan = 'nvidia';
+        apiKey = config.provider['nvidia'].options?.apiKey || null;
+        // Extract model from the models field if available
+        const models = config.provider['nvidia'].models;
+        if (models && typeof models === 'object') {
+          const modelIds = Object.keys(models);
+          if (modelIds.length > 0) {
+            model = modelIds[0];
+          }
+        }
+      } else if (config.provider['openrouter']) {
+        // OpenRouter custom provider
+        plan = 'openrouter';
+        apiKey = config.provider['openrouter'].options?.apiKey || null;
+        // Extract model from the models field if available
+        const models = config.provider['openrouter'].models;
+        if (models && typeof models === 'object') {
+          const modelIds = Object.keys(models);
+          if (modelIds.length > 0) {
+            model = modelIds[0];
+          }
+        }
+      } else if (config.provider['lmstudio']) {
+        // LM Studio custom provider
+        plan = 'lmstudio';
+        apiKey = config.provider['lmstudio'].options?.apiKey || null;
+        // Extract model from the models field if available
+        const models = config.provider['lmstudio'].models;
+        if (models && typeof models === 'object') {
+          const modelIds = Object.keys(models);
+          if (modelIds.length > 0) {
+            model = modelIds[0];
+          }
         }
       }
 
