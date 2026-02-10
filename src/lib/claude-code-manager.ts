@@ -1,9 +1,12 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
-import { join, dirname } from 'path';
+import { existsSync, readFileSync, writeFileSync } from 'fs';
+import { join } from 'path';
 import { homedir } from 'os';
 import { logger } from '../utils/logger.js';
+import type { Plan } from '../utils/config.js';
 import { MCPService } from './tool-manager.js';
 import type { ProviderOptions } from './tool-manager.js';
+import { readJsonConfig, writeJsonConfig } from './config-io.js';
+import { getDefaultAnthropicModel, resolveAnthropicBaseUrl } from '../utils/providers.js';
 
 /**
  * Claude Code Manager
@@ -25,6 +28,8 @@ import type { ProviderOptions } from './tool-manager.js';
  * - GLM Coding Plan (Global): https://api.z.ai/api/anthropic → calls /api/anthropic/v1/messages
  * - GLM Coding Plan (China): https://open.bigmodel.cn/api/anthropic → calls /api/anthropic/v1/messages
  * - OpenRouter: https://openrouter.ai/api → calls /api/v1/messages (OpenRouter supports Anthropic format)
+ * - Alibaba Cloud (DashScope): https://dashscope-intl.aliyuncs.com/apps/anthropic → calls /apps/anthropic/v1/messages
+ * - LM Studio: http://localhost:1234 → calls /v1/messages (LM Studio 0.4.1+ supports Anthropic format)
  * 
  * NOT supported (OpenAI-compatible only, no /v1/messages endpoint):
  * - Kimi/Moonshot: Only provides /v1/chat/completions
@@ -51,55 +56,20 @@ export class ClaudeCodeManager {
     return ClaudeCodeManager.instance;
   }
 
-  private ensureConfigDir(filePath: string) {
-    const dir = dirname(filePath);
-    if (!existsSync(dir)) {
-      mkdirSync(dir, { recursive: true });
-    }
-  }
-
   private getSettings() {
-    try {
-      if (existsSync(this.settingsPath)) {
-        const content = readFileSync(this.settingsPath, 'utf-8');
-        return JSON.parse(content);
-      }
-    } catch (error) {
-      console.warn('Failed to read Claude Code settings:', error);
-      logger.logError('ClaudeCodeManager.getSettings', error);
-    }
-    return {};
+    return readJsonConfig(this.settingsPath, 'ClaudeCodeManager.settings');
   }
 
   private saveSettings(config: any) {
-    try {
-      this.ensureConfigDir(this.settingsPath);
-      writeFileSync(this.settingsPath, JSON.stringify(config, null, 2), 'utf-8');
-    } catch (error) {
-      throw new Error(`Failed to save Claude Code settings: ${error}`);
-    }
+    writeJsonConfig(this.settingsPath, config, 'ClaudeCodeManager.settings', 2);
   }
 
   private getMCPConfig() {
-    try {
-      if (existsSync(this.mcpConfigPath)) {
-        const content = readFileSync(this.mcpConfigPath, 'utf-8');
-        return JSON.parse(content);
-      }
-    } catch (error) {
-      console.warn('Failed to read Claude Code MCP config:', error);
-      logger.logError('ClaudeCodeManager.getMCPConfig', error);
-    }
-    return {};
+    return readJsonConfig(this.mcpConfigPath, 'ClaudeCodeManager.mcp');
   }
 
   private saveMCPConfig(config: any) {
-    try {
-      this.ensureConfigDir(this.mcpConfigPath);
-      writeFileSync(this.mcpConfigPath, JSON.stringify(config, null, 2), 'utf-8');
-    } catch (error) {
-      throw new Error(`Failed to save Claude Code MCP config: ${error}`);
-    }
+    writeJsonConfig(this.mcpConfigPath, config, 'ClaudeCodeManager.mcp', 2);
   }
 
   async loadConfig(plan: string, apiKey: string, options?: ProviderOptions): Promise<void> {
@@ -110,9 +80,15 @@ export class ClaudeCodeManager {
     // 3. Load configurations to settings.json
     const currentSettings = this.getSettings();
     const currentEnv = currentSettings.env || {};
-    const { ANTHROPIC_API_KEY: _, ...cleanedEnv } = currentEnv;
+    const {
+      ANTHROPIC_API_KEY: _legacyApiKey,
+      ANTHROPIC_AUTH_TOKEN: _legacyAuthToken,
+      ...cleanedEnv
+    } = currentEnv;
 
-    const source = (options?.source || '').toString().trim().toLowerCase();
+    const preferredModel = options?.anthropicModel?.trim() || options?.model?.trim();
+    const resolvedAnthropicBaseUrl = resolveAnthropicBaseUrl(plan as Plan, options?.baseUrl);
+    const requestedAnthropicBaseUrl = options?.anthropicBaseUrl?.trim() || resolvedAnthropicBaseUrl;
 
     // Claude Code requires Anthropic-compatible API (POST /v1/messages endpoint)
     // It appends /v1/messages to ANTHROPIC_BASE_URL, so base URL should NOT include /v1
@@ -132,15 +108,27 @@ export class ClaudeCodeManager {
       );
     }
     
-    if (plan === 'openrouter') {
+    if (plan === 'lmstudio') {
+      // LM Studio 0.4.1+ provides Anthropic-compatible /v1/messages endpoint
+      // Claude Code appends /v1/messages to ANTHROPIC_BASE_URL
+      // So base URL should be http://localhost:1234 (NOT http://localhost:1234/v1)
+      // See: https://lmstudio.ai/blog/claudecode
+      baseUrl = requestedAnthropicBaseUrl || 'http://localhost:1234';
+      // LM Studio uses whatever model is loaded; auth token is just "lmstudio"
+      defaultModels = {
+        opus: 'local-model',
+        sonnet: 'local-model',
+        haiku: 'local-model'
+      };
+    } else if (plan === 'openrouter') {
       // OpenRouter supports Anthropic format at /api/v1/messages when base is /api
       // Claude Code appends /v1/messages, so: openrouter.ai/api + /v1/messages = /api/v1/messages
-      baseUrl = 'https://openrouter.ai/api';
+      baseUrl = requestedAnthropicBaseUrl || 'https://openrouter.ai/api';
       // OpenRouter Claude models
       defaultModels = {
-        opus: 'anthropic/claude-opus-4.5',
-        sonnet: 'anthropic/claude-sonnet-4.5',
-        haiku: 'anthropic/claude-haiku-4.5'
+        opus: 'anthropic/claude-opus-4.6',
+        sonnet: 'anthropic/claude-sonnet-4.6',
+        haiku: 'anthropic/claude-haiku-4.6'
       };
     } else if (plan === 'nvidia') {
       // NVIDIA NIM only provides OpenAI-compatible API
@@ -149,9 +137,20 @@ export class ClaudeCodeManager {
         'NVIDIA NIM only provides OpenAI-compatible API (/v1/chat/completions). ' +
         'Use a different tool (like OpenCode, Crush, or Pi) for NVIDIA NIM, or use GLM Coding Plan with Claude Code.'
       );
+    } else if (plan === 'alibaba') {
+      // Alibaba Cloud DashScope - Claude-specific Anthropic-compatible endpoint
+      // See: https://www.alibabacloud.com/help/en/model-studio/claude-code
+      // Claude Code appends /v1/messages, so: /apps/anthropic + /v1/messages = /apps/anthropic/v1/messages
+      baseUrl = requestedAnthropicBaseUrl || 'https://dashscope-intl.aliyuncs.com/apps/anthropic';
+      // Qwen models for Claude Code
+      defaultModels = {
+        opus: 'qwen3-coder-plus',
+        sonnet: 'qwen3-coder-plus',
+        haiku: 'qwen3-coder-flash'
+      };
     } else if (plan === 'glm_coding_plan_global') {
       // GLM Coding Plan Global - use Anthropic-compatible endpoint (NOT the OpenAI endpoint from profile)
-      baseUrl = 'https://api.z.ai/api/anthropic';
+      baseUrl = requestedAnthropicBaseUrl || 'https://api.z.ai/api/anthropic';
       // GLM models per Z.AI docs: https://docs.z.ai/scenario-example/develop-tools/claude
       defaultModels = {
         opus: 'glm-4.7',
@@ -160,18 +159,18 @@ export class ClaudeCodeManager {
       };
     } else if (plan === 'glm_coding_plan_china') {
       // GLM Coding Plan China - use Anthropic-compatible endpoint (NOT the OpenAI endpoint from profile)
-      baseUrl = 'https://open.bigmodel.cn/api/anthropic';
+      baseUrl = requestedAnthropicBaseUrl || 'https://open.bigmodel.cn/api/anthropic';
       // GLM models per Z.AI docs
       defaultModels = {
         opus: 'glm-4.7',
         sonnet: 'glm-4.7',
         haiku: 'glm-4.5-air'
       };
-    } else if (options?.baseUrl?.trim()) {
+    } else if (options?.baseUrl?.trim() || options?.anthropicBaseUrl?.trim()) {
       // Custom/unknown provider - use provided URL as-is
-      baseUrl = options.baseUrl.trim();
+      baseUrl = requestedAnthropicBaseUrl || options.baseUrl!.trim();
       // Use provided model or fallback
-      const customModel = options?.model || 'claude-sonnet-4-5-20250929';
+      const customModel = preferredModel || 'claude-sonnet-4-5-20250929';
       defaultModels = {
         opus: customModel,
         sonnet: customModel,
@@ -190,14 +189,14 @@ export class ClaudeCodeManager {
     // If user specified a model, use it for opus/sonnet
     // Note: For OpenRouter, we keep haiku as a known Anthropic model because
     // Claude Code validates haiku more strictly for background tasks
-    if (options?.model?.trim()) {
-      const model = options.model.trim();
+    if (preferredModel) {
+      const model = preferredModel;
       if (plan === 'openrouter') {
         // OpenRouter: preserve haiku as Anthropic model, use custom model for opus/sonnet
         defaultModels = {
           opus: model,
           sonnet: model,
-          haiku: 'anthropic/claude-haiku-4.5'  // Keep Anthropic model for background tasks
+          haiku: 'anthropic/claude-haiku-4.6'  // Keep Anthropic model for background tasks
         };
       } else {
         // Other providers: use custom model for all three
@@ -207,13 +206,23 @@ export class ClaudeCodeManager {
           haiku: model
         };
       }
+    } else {
+      const fallbackAnthropicModel = getDefaultAnthropicModel(plan as Plan);
+      if (fallbackAnthropicModel) {
+        defaultModels = {
+          opus: defaultModels.opus || fallbackAnthropicModel,
+          sonnet: defaultModels.sonnet || fallbackAnthropicModel,
+          haiku: defaultModels.haiku || fallbackAnthropicModel,
+        };
+      }
     }
 
     const newConfig = {
       ...currentSettings,
       env: {
         ...cleanedEnv,
-        ANTHROPIC_AUTH_TOKEN: apiKey,
+        // Claude Code provider routing should use API-key auth, not login token auth.
+        ANTHROPIC_API_KEY: apiKey,
         ANTHROPIC_BASE_URL: baseUrl,
         // Model configuration - set all three tiers
         ANTHROPIC_DEFAULT_OPUS_MODEL: defaultModels.opus,
@@ -236,6 +245,7 @@ export class ClaudeCodeManager {
     }
     // Remove all Claude Code related environment variables
     const { 
+      ANTHROPIC_API_KEY: _0,
       ANTHROPIC_AUTH_TOKEN: _1, 
       ANTHROPIC_BASE_URL: _2, 
       API_TIMEOUT_MS: _3, 
@@ -260,11 +270,16 @@ export class ClaudeCodeManager {
   async detectCurrentConfig(): Promise<{ plan: string | null; apiKey: string | null; model?: string }> {
     try {
       const settings = this.getSettings();
-      if (!settings.env || !settings.env.ANTHROPIC_AUTH_TOKEN) {
+      const env = settings.env;
+      if (!env) {
         return { plan: null, apiKey: null };
       }
-      const apiKey = settings.env.ANTHROPIC_AUTH_TOKEN;
-      const baseUrl = settings.env.ANTHROPIC_BASE_URL;
+      const apiKey = env.ANTHROPIC_API_KEY || env.ANTHROPIC_AUTH_TOKEN;
+      if (!apiKey) {
+        return { plan: null, apiKey: null };
+      }
+
+      const baseUrl = env.ANTHROPIC_BASE_URL;
       let plan: string | null = null;
       
       // GLM endpoints
@@ -275,6 +290,12 @@ export class ClaudeCodeManager {
       } else if (baseUrl?.includes('openrouter.ai')) {
         // OpenRouter - base is typically https://openrouter.ai/api
         plan = 'openrouter';
+      } else if (baseUrl?.includes('localhost:1234') || baseUrl?.includes('127.0.0.1:1234')) {
+        // LM Studio local server (default port 1234)
+        plan = 'lmstudio';
+      } else if (baseUrl?.includes('dashscope') || baseUrl?.includes('aliyuncs.com/apps/anthropic')) {
+        // Alibaba Cloud DashScope Claude-specific endpoint
+        plan = 'alibaba';
       } else if (baseUrl?.includes('nvidia.com')) {
         // NVIDIA - should not work but detect anyway
         plan = 'nvidia';
@@ -288,7 +309,7 @@ export class ClaudeCodeManager {
       
       // Return the sonnet model as the primary model (used for display)
       // Claude Code uses sonnet as the default
-      const model = settings.env.ANTHROPIC_DEFAULT_SONNET_MODEL;
+      const model = env.ANTHROPIC_DEFAULT_SONNET_MODEL;
       
       return { plan, apiKey, model };
     } catch {
@@ -310,7 +331,7 @@ export class ClaudeCodeManager {
 
   private cleanupShellEnvVars() {
     // 检查当前环境变量是否有这些值
-    if (!process.env.ANTHROPIC_API_KEY && !process.env.ANTHROPIC_BASE_URL) {
+    if (!process.env.ANTHROPIC_API_KEY && !process.env.ANTHROPIC_AUTH_TOKEN && !process.env.ANTHROPIC_BASE_URL) {
       return;
     }
     try {
@@ -321,10 +342,11 @@ export class ClaudeCodeManager {
       }
       let content = readFileSync(rcFile, 'utf-8');
       const originalContent = content;
-      // 移除 ANTHROPIC_BASE_URL 和 ANTHROPIC_API_KEY 相关行
+      // 移除 ANTHROPIC_BASE_URL / ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN 相关行
       const linesToRemove = [
         /^\s*export\s+ANTHROPIC_BASE_URL=.*$/gm,
         /^\s*export\s+ANTHROPIC_API_KEY=.*$/gm,
+        /^\s*export\s+ANTHROPIC_AUTH_TOKEN=.*$/gm,
         /^\s*#\s*Claude Code environment variables\s*$/gm
       ];
       for (const pattern of linesToRemove) {
@@ -392,9 +414,14 @@ export class ClaudeCodeManager {
           env = { ...mcp.env };
         }
 
+        for (const [key, value] of Object.entries(env)) {
+          if (value !== '' || !process.env[key]) continue;
+          env[key] = process.env[key] as string;
+        }
+
         // Add API key if required
         if (mcp.requiresAuth && apiKey) {
-          env.Z_AI_API_KEY = apiKey;
+          env[mcp.authEnvVar || 'Z_AI_API_KEY'] = apiKey;
         }
 
         mcpConfig = {
@@ -424,9 +451,11 @@ export class ClaudeCodeManager {
 
         // Add API key to headers if required
         if (mcp.requiresAuth && apiKey) {
+          const headerName = mcp.authHeader || 'Authorization';
+          const authScheme = mcp.authScheme || 'Bearer';
           mcpConfig.headers = {
             ...mcpConfig.headers,
-            'Authorization': `Bearer ${apiKey}`
+            [headerName]: authScheme === 'Bearer' ? `Bearer ${apiKey}` : apiKey
           };
         }
       } else {

@@ -16,12 +16,18 @@ export const BUILTIN_MCP_SERVICES: MCPService[] = [
     description: 'GitHub integration',
     protocol: 'stdio',
     command: 'npx',
-    args: ['--silent', '--silent', '-y', '@modelcontextprotocol/server-github'],
-    requiresAuth: true,
+    args: ['--silent', '-y', '@modelcontextprotocol/server-github'],
+    // GitHub token should come from GITHUB_TOKEN in your environment
+    // (we intentionally do not inject provider API keys into GitHub MCP).
+    requiresAuth: false,
     envTemplate: {
       glm_coding_plan_global: { GITHUB_TOKEN: '' },
       glm_coding_plan_china: { GITHUB_TOKEN: '' },
-      kimi: { GITHUB_TOKEN: '' }
+      kimi: { GITHUB_TOKEN: '' },
+      openrouter: { GITHUB_TOKEN: '' },
+      nvidia: { GITHUB_TOKEN: '' },
+      lmstudio: { GITHUB_TOKEN: '' },
+      alibaba: { GITHUB_TOKEN: '' }
     }
   },
   // Z AI MCP Servers (GLM API)

@@ -8,18 +8,22 @@ export const CONFIG_FILE = join(CONFIG_DIR, 'config.yaml');
 export const LEGACY_CONFIG_DIR = join(homedir(), '.chelper');
 export const LEGACY_CONFIG_FILE = join(LEGACY_CONFIG_DIR, 'config.yaml');
 
-export type Plan = 'glm_coding_plan_global' | 'glm_coding_plan_china' | 'kimi' | 'openrouter' | 'nvidia' | 'lmstudio';
+export type Plan = 'glm_coding_plan_global' | 'glm_coding_plan_china' | 'kimi' | 'openrouter' | 'nvidia' | 'lmstudio' | 'alibaba';
 
-export const KIMI_LIKE_PLANS: ReadonlySet<string> = new Set(['kimi', 'openrouter', 'nvidia', 'lmstudio']);
+export const KIMI_LIKE_PLANS: ReadonlySet<string> = new Set(['kimi', 'openrouter', 'nvidia', 'lmstudio', 'alibaba']);
 
-export function isKimiLikePlan(plan: string | undefined): plan is 'kimi' | 'openrouter' | 'nvidia' {
+export type OpenAICompatiblePlan = Exclude<Plan, 'glm_coding_plan_global' | 'glm_coding_plan_china'>;
+
+export function isKimiLikePlan(plan: string | undefined): plan is OpenAICompatiblePlan {
   return !!plan && KIMI_LIKE_PLANS.has(plan);
 }
 
 export interface ProviderConfig {
   api_key?: string;
   base_url?: string;
+  anthropic_base_url?: string;
   model?: string;
+  anthropic_model?: string;
   provider_id?: string;
   max_context_size?: number;
 }
@@ -48,6 +52,7 @@ export interface Config {
     openrouter?: ProviderConfig;
     nvidia?: ProviderConfig;
     lmstudio?: ProviderConfig;
+    alibaba?: ProviderConfig;
   };
 }
 
@@ -56,7 +61,9 @@ export type KimiSource = 'moonshot' | 'openrouter' | 'nvidia' | 'custom';
 
 export interface ProviderSettings {
   baseUrl: string;
+  anthropicBaseUrl?: string;
   model?: string;
+  anthropicModel?: string;
   providerId?: string;
   source: string;
   maxContextSize?: number;
@@ -303,10 +310,13 @@ export class ConfigManager {
         if (!existsSync(c.path)) continue;
         const content = readFileSync(c.path, 'utf-8');
         const doc = yaml.load(content);
-        if (doc && typeof doc === 'object') {
-          return { config: doc as Config, filePath: c.path, loadedFromLegacy: c.legacy };
+        if (doc == null) {
+          return { config: null, filePath: c.path, loadedFromLegacy: c.legacy };
         }
-        return { config: this.parseYaml(content) as Config, filePath: c.path, loadedFromLegacy: c.legacy };
+        if (typeof doc !== 'object' || Array.isArray(doc)) {
+          throw new Error(`Config root must be a YAML object: ${c.path}`);
+        }
+        return { config: doc as Config, filePath: c.path, loadedFromLegacy: c.legacy };
       } catch (error) {
         console.warn('Failed to load config:', error);
         // try next candidate
@@ -357,7 +367,7 @@ export class ConfigManager {
       return { plan, apiKey };
     }
 
-    // kimi, openrouter, nvidia
+    // OpenAI-compatible providers (kimi/openrouter/nvidia/lmstudio/alibaba)
     const prov = (this.config.providers as any)?.[plan];
     return { plan, apiKey: prov?.api_key };
   }
@@ -395,13 +405,52 @@ export class ConfigManager {
     this.save();
   }
 
-  private static readonly PROVIDER_DEFAULTS: Record<string, { baseUrl: string; model: string; source: string; maxContextSize?: number }> = {
+  private static readonly PROVIDER_DEFAULTS: Record<
+    string,
+    { baseUrl: string; anthropicBaseUrl?: string; model: string; anthropicModel?: string; source: string; maxContextSize?: number }
+  > = {
     kimi: { baseUrl: 'https://api.moonshot.ai/v1', model: 'moonshot-ai/kimi-k2.5', source: 'moonshot', maxContextSize: 262144 },
-    openrouter: { baseUrl: 'https://openrouter.ai/api/v1', model: 'moonshotai/kimi-k2.5', source: 'openrouter', maxContextSize: 16384 },
+    openrouter: {
+      baseUrl: 'https://openrouter.ai/api/v1',
+      anthropicBaseUrl: 'https://openrouter.ai/api',
+      model: 'moonshotai/kimi-k2.5',
+      anthropicModel: 'anthropic/claude-sonnet-4.6',
+      source: 'openrouter',
+      maxContextSize: 16384,
+    },
     nvidia: { baseUrl: 'https://integrate.api.nvidia.com/v1', model: 'moonshotai/kimi-k2.5', source: 'nvidia', maxContextSize: 4096 },
-    lmstudio: { baseUrl: 'http://localhost:1234/v1', model: 'lmstudio-community', source: 'lmstudio', maxContextSize: 128000 },
-    glm_coding_plan_global: { baseUrl: 'https://api.z.ai/api/coding/paas/v4', model: 'glm-4', source: 'glm-global', maxContextSize: 128000 },
-    glm_coding_plan_china: { baseUrl: 'https://open.bigmodel.cn/api/coding/paas/v4', model: 'glm-4', source: 'glm-china', maxContextSize: 128000 }
+    lmstudio: {
+      baseUrl: 'http://localhost:1234/v1',
+      anthropicBaseUrl: 'http://localhost:1234',
+      model: 'lmstudio-community',
+      anthropicModel: 'local-model',
+      source: 'lmstudio',
+      maxContextSize: 128000,
+    },
+    alibaba: {
+      baseUrl: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
+      anthropicBaseUrl: 'https://dashscope-intl.aliyuncs.com/apps/anthropic',
+      model: 'qwen3-coder-plus',
+      anthropicModel: 'qwen3-coder-plus',
+      source: 'alibaba',
+      maxContextSize: 128000,
+    },
+    glm_coding_plan_global: {
+      baseUrl: 'https://api.z.ai/api/coding/paas/v4',
+      anthropicBaseUrl: 'https://api.z.ai/api/anthropic',
+      model: 'glm-4',
+      anthropicModel: 'glm-4.7',
+      source: 'glm-global',
+      maxContextSize: 128000,
+    },
+    glm_coding_plan_china: {
+      baseUrl: 'https://open.bigmodel.cn/api/coding/paas/v4',
+      anthropicBaseUrl: 'https://open.bigmodel.cn/api/anthropic',
+      model: 'glm-4',
+      anthropicModel: 'glm-4.7',
+      source: 'glm-china',
+      maxContextSize: 128000,
+    }
   };
 
   /**
@@ -423,7 +472,9 @@ export class ConfigManager {
 
     return {
       baseUrl: (prov?.base_url ?? defaults.baseUrl).trim(),
+      anthropicBaseUrl: (prov?.anthropic_base_url ?? defaults.anthropicBaseUrl)?.trim(),
       model: prov?.model || defaults.model,
+      anthropicModel: prov?.anthropic_model || defaults.anthropicModel,
       providerId: prov?.provider_id || undefined,
       source: defaults.source,
       maxContextSize: prov?.max_context_size ?? defaults.maxContextSize,
@@ -435,7 +486,17 @@ export class ConfigManager {
     return this.getProviderSettings(this.config.plan || 'kimi');
   }
 
-  setProviderProfile(plan: Plan, profile: { base_url?: string; model?: string; provider_id?: string; max_context_size?: number }): void {
+  setProviderProfile(
+    plan: Plan,
+    profile: {
+      base_url?: string;
+      anthropic_base_url?: string;
+      model?: string;
+      anthropic_model?: string;
+      provider_id?: string;
+      max_context_size?: number;
+    }
+  ): void {
     this.config.providers = this.config.providers && typeof this.config.providers === 'object' ? this.config.providers : {};
     if (plan === 'glm_coding_plan_global') {
       this.config.providers.glm = this.config.providers.glm && typeof this.config.providers.glm === 'object' ? this.config.providers.glm : {};
@@ -497,61 +558,10 @@ export class ConfigManager {
     if (this.config.providers?.openrouter) delete this.config.providers.openrouter.api_key;
     if (this.config.providers?.nvidia) delete this.config.providers.nvidia.api_key;
     if (this.config.providers?.lmstudio) delete this.config.providers.lmstudio.api_key;
+    if (this.config.providers?.alibaba) delete this.config.providers.alibaba.api_key;
     this.save();
   }
 
-  private parseYaml(content: string): any {
-    // Simple YAML parser for our limited use case
-    const result: any = {};
-    const lines = content.split('\n');
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#')) continue;
-      const [key, ...valueParts] = trimmed.split(':');
-      if (key && valueParts.length > 0) {
-        const value = valueParts.join(':').trim();
-        if (value === 'null' || value === '') {
-          result[key.trim()] = null;
-        } else if (value === 'true') {
-          result[key.trim()] = true;
-        } else if (value === 'false') {
-          result[key.trim()] = false;
-        } else if (!isNaN(Number(value))) {
-          result[key.trim()] = Number(value);
-        } else {
-          result[key.trim()] = value.replace(/^["']|["']$/g, '');
-        }
-      }
-    }
-    return result;
-  }
-
-  private toYaml(obj: any, indent = 0): string {
-    const lines: string[] = [];
-    const spaces = '  '.repeat(indent);
-
-    for (const [key, value] of Object.entries(obj)) {
-      if (value === null || value === undefined) {
-        lines.push(`${spaces}${key}: null`);
-      } else if (typeof value === 'boolean') {
-        lines.push(`${spaces}${key}: ${value}`);
-      } else if (typeof value === 'number') {
-        lines.push(`${spaces}${key}: ${value}`);
-      } else if (typeof value === 'string') {
-        lines.push(`${spaces}${key}: "${value}"`);
-      } else if (Array.isArray(value)) {
-        lines.push(`${spaces}${key}:`);
-        for (const item of value) {
-          lines.push(`${spaces}  - ${item}`);
-        }
-      } else if (typeof value === 'object') {
-        lines.push(`${spaces}${key}:`);
-        lines.push(this.toYaml(value, indent + 1));
-      }
-    }
-
-    return lines.join('\n');
-  }
 }
 
 export const configManager = ConfigManager.getInstance();

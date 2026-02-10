@@ -16,6 +16,7 @@ const PROVIDER_BASE_URLS: Record<string, string> = {
   'https://api.moonshot.ai/v1': 'kimi',
   'https://openrouter.ai/api/v1': 'openrouter',
   'https://integrate.api.nvidia.com/v1': 'nvidia',
+  'https://dashscope-intl.aliyuncs.com/compatible-mode/v1': 'alibaba',
 };
 
 type AnyRecord = Record<string, any>;
@@ -290,8 +291,13 @@ export class KimiManager {
         env = { ...mcp.env };
       }
 
+      for (const [key, value] of Object.entries(env)) {
+        if (value !== '' || !process.env[key]) continue;
+        env[key] = process.env[key] as string;
+      }
+
       if (mcp.requiresAuth && apiKey) {
-        env.Z_AI_API_KEY = apiKey;
+        env[mcp.authEnvVar || 'Z_AI_API_KEY'] = apiKey;
       }
 
       config.mcp.servers[mcp.id] = {
@@ -315,7 +321,9 @@ export class KimiManager {
 
       const headers: Record<string, string> = { ...(mcp.headers || {}) };
       if (mcp.requiresAuth && apiKey) {
-        headers.Authorization = `Bearer ${apiKey}`;
+        const headerName = mcp.authHeader || 'Authorization';
+        const authScheme = mcp.authScheme || 'Bearer';
+        headers[headerName] = authScheme === 'Bearer' ? `Bearer ${apiKey}` : apiKey;
       }
 
       config.mcp.servers[mcp.id] = {

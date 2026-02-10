@@ -1,9 +1,8 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
-import { join, dirname } from 'path';
+import { join } from 'path';
 import { homedir } from 'os';
-import { logger } from '../utils/logger.js';
 import { MCPService } from './tool-manager.js';
 import type { ProviderOptions } from './tool-manager.js';
+import { readJsonConfig, writeJsonConfig } from './config-io.js';
 
 export class FactoryDroidManager {
   static instance: FactoryDroidManager | null = null;
@@ -24,55 +23,20 @@ export class FactoryDroidManager {
     return FactoryDroidManager.instance;
   }
 
-  private ensureConfigDir() {
-    const dir = dirname(this.configPath);
-    if (!existsSync(dir)) {
-      mkdirSync(dir, { recursive: true });
-    }
-  }
-
   private getConfig() {
-    try {
-      if (existsSync(this.configPath)) {
-        const content = readFileSync(this.configPath, 'utf-8');
-        return JSON.parse(content);
-      }
-    } catch (error) {
-      console.warn('Failed to read Factory Droid config:', error);
-      logger.logError('FactoryDroidManager.getConfig', error);
-    }
-    return {};
+    return readJsonConfig(this.configPath, 'FactoryDroidManager.config');
   }
 
   private saveConfig(config: any) {
-    try {
-      this.ensureConfigDir();
-      writeFileSync(this.configPath, JSON.stringify(config, null, 2), 'utf-8');
-    } catch (error) {
-      throw new Error(`Failed to save Factory Droid config: ${error}`);
-    }
+    writeJsonConfig(this.configPath, config, 'FactoryDroidManager.config', 2);
   }
 
   private getMCPConfig() {
-    try {
-      if (existsSync(this.mcpConfigPath)) {
-        const content = readFileSync(this.mcpConfigPath, 'utf-8');
-        return JSON.parse(content);
-      }
-    } catch (error) {
-      console.warn('Failed to read Factory Droid MCP config:', error);
-      logger.logError('FactoryDroidManager.getMCPConfig', error);
-    }
-    return {};
+    return readJsonConfig(this.mcpConfigPath, 'FactoryDroidManager.mcp');
   }
 
   private saveMCPConfig(config: any) {
-    try {
-      this.ensureConfigDir();
-      writeFileSync(this.mcpConfigPath, JSON.stringify(config, null, 2), 'utf-8');
-    } catch (error) {
-      throw new Error(`Failed to save Factory Droid MCP config: ${error}`);
-    }
+    writeJsonConfig(this.mcpConfigPath, config, 'FactoryDroidManager.mcp', 2);
   }
 
   private getBaseUrl(plan: string, protocol: 'anthropic' | 'openai', options?: ProviderOptions): string {
@@ -314,9 +278,14 @@ export class FactoryDroidManager {
           env = { ...mcp.env };
         }
 
+        for (const [key, value] of Object.entries(env)) {
+          if (value !== '' || !process.env[key]) continue;
+          env[key] = process.env[key] as string;
+        }
+
         // Add API key if required
         if (mcp.requiresAuth && apiKey) {
-          env.Z_AI_API_KEY = apiKey;
+          env[mcp.authEnvVar || 'Z_AI_API_KEY'] = apiKey;
         }
 
         mcpConfig = {
@@ -351,9 +320,11 @@ export class FactoryDroidManager {
 
         // Add API key to headers if required
         if (mcp.requiresAuth && apiKey) {
+          const headerName = mcp.authHeader || 'Authorization';
+          const authScheme = mcp.authScheme || 'Bearer';
           mcpConfig.headers = {
             ...mcpConfig.headers,
-            'Authorization': `Bearer ${apiKey}`
+            [headerName]: authScheme === 'Bearer' ? `Bearer ${apiKey}` : apiKey
           };
         }
       } else {

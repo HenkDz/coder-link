@@ -1,10 +1,11 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
-import { dirname, join } from 'path';
+import { existsSync } from 'fs';
+import { join } from 'path';
 import { homedir } from 'os';
 
 import { logger } from '../utils/logger.js';
 import type { MCPService } from './tool-manager.js';
 import type { ProviderOptions } from './tool-manager.js';
+import { readJsonConfig, writeJsonConfig } from './config-io.js';
 
 const PI_PROVIDER_ID = 'moonshot';
 
@@ -26,33 +27,12 @@ export class PiManager {
     return PiManager.instance;
   }
 
-  private ensureDir(): void {
-    const dir = dirname(this.configPath);
-    if (!existsSync(dir)) {
-      mkdirSync(dir, { recursive: true });
-    }
-  }
-
   private readConfig(): AnyRecord {
-    try {
-      if (!existsSync(this.configPath)) return {};
-      const text = readFileSync(this.configPath, 'utf-8');
-      if (!text.trim()) return {};
-      return JSON.parse(text) as AnyRecord;
-    } catch (error) {
-      logger.logError('PiManager.readConfig', error);
-      throw new Error(`Failed to parse Pi models config at ${this.configPath}`);
-    }
+    return readJsonConfig(this.configPath, 'PiManager') as AnyRecord;
   }
 
   private writeConfig(config: AnyRecord): void {
-    try {
-      this.ensureDir();
-      writeFileSync(this.configPath, JSON.stringify(config, null, 2), 'utf-8');
-    } catch (error) {
-      logger.logError('PiManager.writeConfig', error);
-      throw new Error(`Failed to write Pi models config at ${this.configPath}`);
-    }
+    writeJsonConfig(this.configPath, config, 'PiManager', 2);
   }
 
   async detectCurrentConfig(): Promise<{ plan: string | null; apiKey: string | null; model?: string }> {

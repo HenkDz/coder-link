@@ -214,3 +214,87 @@ export async function testOpenAIChatCompletionsApi(params: {
     return { ok: false, url, detail: msg };
   }
 }
+
+export async function testAnthropicMessagesApi(params: {
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  timeoutMs?: number;
+}): Promise<ApiTestResult> {
+  const timeoutMs = params.timeoutMs ?? 12000;
+  const baseUrl = params.baseUrl.trim();
+  const apiKey = params.apiKey.trim();
+  const model = params.model.trim();
+
+  const url = joinUrl(baseUrl, '/v1/messages');
+
+  if (!baseUrl) return { ok: false, url, detail: 'Base URL is empty' };
+  if (!apiKey) return { ok: false, url, detail: 'API key is empty' };
+  if (!model) return { ok: false, url, detail: 'Model is empty' };
+
+  const runProbe = async (headers: Record<string, string>, authLabel: string): Promise<ApiTestResult> => {
+    try {
+      const resp = await fetchWithTimeout(
+        url,
+        {
+          method: 'POST',
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+            ...headers,
+          },
+          body: JSON.stringify({
+            model,
+            max_tokens: 1,
+            messages: [{ role: 'user', content: 'ping' }],
+          }),
+        },
+        timeoutMs
+      );
+
+      const status = resp.status;
+      const text = await resp.text();
+
+      if (resp.ok) {
+        try {
+          const json = JSON.parse(text);
+          const id = typeof json?.id === 'string' ? json.id : undefined;
+          const stop = typeof json?.stop_reason === 'string' ? json.stop_reason : undefined;
+          const hint = [id ? `id: ${id}` : null, stop ? `stop: ${stop}` : null].filter(Boolean).join(', ');
+          return { ok: true, status, url, detail: hint ? `OK (${hint}, auth: ${authLabel})` : `OK (auth: ${authLabel})` };
+        } catch {
+          return { ok: true, status, url, detail: `OK (auth: ${authLabel})` };
+        }
+      }
+
+      const snippet = text.length > 300 ? `${text.slice(0, 300)}...` : text;
+      return { ok: false, status, url, detail: snippet || `HTTP ${status}` };
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      return { ok: false, url, detail: msg };
+    }
+  };
+
+  const xApiKeyResult = await runProbe(
+    {
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+    },
+    'x-api-key'
+  );
+  if (xApiKeyResult.ok) return xApiKeyResult;
+
+  if (xApiKeyResult.status === 401 || xApiKeyResult.status === 403) {
+    const bearerResult = await runProbe(
+      {
+        'Authorization': `Bearer ${apiKey}`,
+        'anthropic-version': '2023-06-01',
+      },
+      'bearer'
+    );
+    if (bearerResult.ok) return bearerResult;
+    return bearerResult;
+  }
+
+  return xApiKeyResult;
+}

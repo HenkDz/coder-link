@@ -1,9 +1,9 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
-import { join, dirname } from 'path';
+import { existsSync } from 'fs';
+import { join } from 'path';
 import { homedir } from 'os';
-import { logger } from '../utils/logger.js';
 import { MCPService } from './tool-manager.js';
 import type { ProviderOptions } from './tool-manager.js';
+import { readJsonConfig, writeJsonConfig } from './config-io.js';
 
 export class OpenCodeManager {
   static instance: OpenCodeManager | null = null;
@@ -21,33 +21,12 @@ export class OpenCodeManager {
     return OpenCodeManager.instance;
   }
 
-  private ensureConfigDir() {
-    const dir = dirname(this.configPath);
-    if (!existsSync(dir)) {
-      mkdirSync(dir, { recursive: true });
-    }
-  }
-
   private getConfig() {
-    try {
-      if (existsSync(this.configPath)) {
-        const content = readFileSync(this.configPath, 'utf-8');
-        return JSON.parse(content);
-      }
-    } catch (error) {
-      console.warn('Failed to read OpenCode config:', error);
-      logger.logError('OpenCodeManager.getConfig', error);
-    }
-    return {};
+    return readJsonConfig(this.configPath, 'OpenCodeManager');
   }
 
   private saveConfig(config: any) {
-    try {
-      this.ensureConfigDir();
-      writeFileSync(this.configPath, JSON.stringify(config, null, 4), 'utf-8');
-    } catch (error) {
-      throw new Error(`Failed to save OpenCode config: ${error}`);
-    }
+    writeJsonConfig(this.configPath, config, 'OpenCodeManager', 4);
   }
 
   private getProviderName(plan: string): string {
@@ -372,9 +351,15 @@ export class OpenCodeManager {
           env = { ...mcp.env };
         }
 
+        // Fill empty template values from current process environment.
+        for (const [key, value] of Object.entries(env)) {
+          if (value !== '' || !process.env[key]) continue;
+          env[key] = process.env[key] as string;
+        }
+
         // Add API key if required
         if (mcp.requiresAuth && apiKey) {
-          env.Z_AI_API_KEY = apiKey;
+          env[mcp.authEnvVar || 'Z_AI_API_KEY'] = apiKey;
         }
 
         // OpenCode uses local type and command array
@@ -406,9 +391,11 @@ export class OpenCodeManager {
 
         // Add API key to headers if required
         if (mcp.requiresAuth && apiKey) {
+          const headerName = mcp.authHeader || 'Authorization';
+          const authScheme = mcp.authScheme || 'Bearer';
           mcpConfig.headers = {
             ...mcpConfig.headers,
-            'Authorization': `Bearer ${apiKey}`
+            [headerName]: authScheme === 'Bearer' ? `Bearer ${apiKey}` : apiKey
           };
         }
       } else {

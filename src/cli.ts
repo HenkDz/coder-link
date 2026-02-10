@@ -6,11 +6,13 @@ import { logger } from './utils/logger.js';
 import { i18n } from './utils/i18n.js';
 import { configManager } from './utils/config.js';
 import { toolManager } from './lib/tool-manager.js';
-import { runMenu } from './menu.js';
+import type { ToolName } from './lib/tool-manager.js';
+import { runMenu } from './menu/main-menu.js';
 import { runWizard } from './wizard.js';
 import { statusIndicator, planLabel, planLabelColored, toolLabel } from './utils/brand.js';
 import { setOutputFormat, getOutputFormat, printData, printError } from './utils/output.js';
-import { configManager as config } from './utils/config.js';
+import { PROVIDER_PLAN_VALUES } from './utils/providers.js';
+import { BUILTIN_MCP_SERVICES } from './mcp-services.js';
 
 const program = new Command();
 
@@ -21,10 +23,38 @@ i18n.setLang(configManager.getLang());
 const jsonOption = new Option('-j, --json', 'Output as JSON for programmatic use');
 const formatOption = new Option('-f, --format <format>', 'Output format').choices(['pretty', 'json']).default('pretty');
 
+function getMcpCapableTools(): ToolName[] {
+  return toolManager.getSupportedTools().filter((tool) => toolManager.getCapabilities(tool).supportsMcp);
+}
+
+function resolveMcpTool(explicitTool?: string): ToolName {
+  const mcpTools = getMcpCapableTools();
+  if (mcpTools.length === 0) {
+    throw new Error('No tools support MCP management');
+  }
+
+  if (explicitTool) {
+    if (!toolManager.isSupportedTool(explicitTool)) {
+      throw new Error(`Unsupported tool: ${explicitTool}`);
+    }
+    if (!toolManager.getCapabilities(explicitTool).supportsMcp) {
+      throw new Error(`${toolLabel(explicitTool)} does not support MCP management`);
+    }
+    return explicitTool;
+  }
+
+  const last = configManager.getLastUsedTool();
+  if (last && toolManager.isSupportedTool(last) && toolManager.getCapabilities(last).supportsMcp) {
+    return last;
+  }
+
+  return mcpTools[0];
+}
+
 program
   .name('coder-link')
   .description('Coder Link — Connect coding tools to any model/provider')
-  .version('0.0.8')
+  .version('0.0.9')
   .addOption(formatOption)
   .hook('preAction', (thisCommand) => {
     const opts = thisCommand.opts();
@@ -40,6 +70,8 @@ program
   .option('-s, --shell <shell>', 'Shell type (bash, zsh, fish, pwsh)', 'bash')
   .action(async (options) => {
     const shell = options.shell;
+    const providerValues = PROVIDER_PLAN_VALUES.join(' ');
+    const providerValuesQuoted = PROVIDER_PLAN_VALUES.map((p) => `'${p}'`).join(', ');
     let script = '';
     
     switch (shell) {
@@ -47,9 +79,9 @@ program
         script = `#!/bin/bash
 _coder_link_completion() {
   local cur="\${COMP_WORDS[COMP_CWORD]}"
-  local commands="init auth lang tools doctor status completion"
+  local commands="init auth lang tools mcp doctor status completion"
   local tools="claude-code opencode crush factory-droid kimi amp pi"
-  local providers="glm_coding_plan_global glm_coding_plan_china kimi openrouter nvidia"
+  local providers="${providerValues}"
   local services="filesystem github"
   
   if [[ \${COMP_CWORD} -eq 1 ]]; then
@@ -58,7 +90,7 @@ _coder_link_completion() {
     local subcommand="\${COMP_WORDS[1]}"
     case "$subcommand" in
       auth)
-        COMPREPLY=($(compgen -W "glm_coding_plan_global glm_coding_plan_china kimi openrouter nvidia revoke reload" -- "$cur"))
+        COMPREPLY=($(compgen -W "${providerValues} revoke reload" -- "$cur"))
         ;;
       tools)
         if [[ "\${COMP_WORDS[2]}" == "install" || "\${COMP_WORDS[2]}" == "uninstall" ]]; then
@@ -93,9 +125,9 @@ _coder_link() {
   local curcontext="$curcontext" state line
   typeset -A opt_args
   
-  local commands=(init auth lang tools doctor status completion)
+  local commands=(init auth lang tools mcp doctor status completion)
   local tools=(claude-code opencode crush factory-droid kimi amp pi)
-  local providers=(glm_coding_plan_global glm_coding_plan_china kimi openrouter nvidia)
+  local providers=(${PROVIDER_PLAN_VALUES.join(' ')})
   local services=(filesystem github)
   
   _arguments -C \
@@ -142,11 +174,7 @@ complete -c coder-link -n "__fish_use_subcommand" -a "status" -d "Show current s
 complete -c coder-link -n "__fish_use_subcommand" -a "completion" -d "Generate shell completion"
 
 # Auth subcommands
-complete -c coder-link -n "__fish_seen_subcommand_from auth" -a "glm_coding_plan_global"
-complete -c coder-link -n "__fish_seen_subcommand_from auth" -a "glm_coding_plan_china"
-complete -c coder-link -n "__fish_seen_subcommand_from auth" -a "kimi"
-complete -c coder-link -n "__fish_seen_subcommand_from auth" -a "openrouter"
-complete -c coder-link -n "__fish_seen_subcommand_from auth" -a "nvidia"
+${PROVIDER_PLAN_VALUES.map((provider) => `complete -c coder-link -n "__fish_seen_subcommand_from auth" -a "${provider}"`).join('\n')}
 complete -c coder-link -n "__fish_seen_subcommand_from auth" -a "revoke"
 `;
         break;
@@ -157,7 +185,7 @@ complete -c coder-link -n "__fish_seen_subcommand_from auth" -a "revoke"
     
     $commands = @('init', 'auth', 'lang', 'tools', 'mcp', 'doctor', 'status', 'completion')
     $tools = @('claude-code', 'opencode', 'crush', 'factory-droid', 'kimi', 'amp', 'pi')
-    $providers = @('glm_coding_plan_global', 'glm_coding_plan_china', 'kimi', 'openrouter', 'nvidia')
+    $providers = @(${providerValuesQuoted})
     $services = @('filesystem', 'github')
     
     $commandElements = $commandAst.CommandElements | Select-Object -Skip 1
@@ -366,6 +394,56 @@ program
       }
     })
   )
+  .addCommand(new Command('alibaba [token]')
+    .description('Set Alibaba Cloud (DashScope) API key')
+    .action(async (token?: string) => {
+      try {
+        if (!token) {
+          const { apiKey } = await inquirer.prompt<{ apiKey: string }>([{
+            type: 'password',
+            name: 'apiKey',
+            message: i18n.t('wizard.enter_api_key'),
+            validate: (input: string) => input.trim().length > 0 || 'API key cannot be empty'
+          }]);
+          token = apiKey;
+        }
+        configManager.setAuth('alibaba', token.trim());
+        console.log(i18n.t('auth.set_success'));
+      } catch (error) {
+        logger.logError('auth.set', error);
+        printError(
+          error instanceof Error ? error.message : String(error),
+          'Run "coder-link auth" for interactive setup'
+        );
+        process.exit(1);
+      }
+    })
+  )
+  .addCommand(new Command('lmstudio [token]')
+    .description('Set LM Studio API key (optional for local use)')
+    .action(async (token?: string) => {
+      try {
+        if (!token) {
+          const { apiKey } = await inquirer.prompt<{ apiKey: string }>([{
+            type: 'password',
+            name: 'apiKey',
+            message: `${i18n.t('wizard.enter_api_key')} (leave empty for local LM Studio)`,
+          }]);
+          token = apiKey;
+        }
+        const normalized = token.trim() || 'lmstudio';
+        configManager.setAuth('lmstudio', normalized);
+        console.log(i18n.t('auth.set_success'));
+      } catch (error) {
+        logger.logError('auth.set', error);
+        printError(
+          error instanceof Error ? error.message : String(error),
+          'Run "coder-link auth" for interactive setup'
+        );
+        process.exit(1);
+      }
+    })
+  )
   .addCommand(new Command('revoke')
     .description('Delete saved API key')
     .action(async () => {
@@ -487,68 +565,76 @@ program
   .addCommand(new Command('list')
     .description('List available MCP services')
     .action(async () => {
-      const services = [
-        { id: 'filesystem', name: 'Filesystem', description: 'File system operations' },
-        { id: 'github', name: 'GitHub', description: 'GitHub integration' }
-      ];
+      const services = BUILTIN_MCP_SERVICES.map((service) => ({
+        id: service.id,
+        name: service.name,
+        description: service.description || '',
+        protocol: service.protocol,
+      }));
+      const mcpTools = getMcpCapableTools();
       
       if (getOutputFormat().isJson) {
-        printData({ services });
+        printData({ services, tools: mcpTools });
       } else {
         console.log(i18n.t('mcp.list_header'));
         for (const service of services) {
-          console.log(`  ${service.id}: ${service.name} - ${service.description}`);
+          console.log(`  ${service.id}: ${service.name} - ${service.description} [${service.protocol}]`);
         }
+        console.log(`\nMCP-capable tools: ${mcpTools.map((t) => toolLabel(t)).join(', ')}`);
       }
     })
   )
   .addCommand(new Command('installed')
     .description('List installed MCP services')
-    .action(async () => {
-      const { kimiManager } = await import('./lib/kimi-manager.js');
-      const installed = kimiManager.getInstalledMCPs();
+    .option('-t, --tool <tool>', 'Target tool (defaults to last used MCP-capable tool)')
+    .action(async (options: { tool?: string }) => {
+      const targetTool = resolveMcpTool(options.tool);
+      const installed = await toolManager.getInstalledMCPs(targetTool);
       
       if (getOutputFormat().isJson) {
-        printData({ installed });
+        printData({ tool: targetTool, installed });
       } else {
-        console.log(i18n.t('mcp.installed_header'));
+        console.log(`${i18n.t('mcp.installed_header')} (${toolLabel(targetTool)})`);
         for (const id of installed) {
           console.log(`  ${id}`);
+        }
+        if (installed.length === 0) {
+          console.log('  (none)');
         }
       }
     })
   )
   .addCommand(new Command('install <service>')
     .description('Install an MCP service')
-    .action(async (serviceId: string) => {
+    .option('-t, --tool <tool>', 'Target tool (defaults to last used MCP-capable tool)')
+    .action(async (serviceId: string, options: { tool?: string }) => {
       try {
-        const { kimiManager } = await import('./lib/kimi-manager.js');
-        const { toolManager } = await import('./lib/tool-manager.js');
-        const { configManager } = await import('./utils/config.js');
+        const targetTool = resolveMcpTool(options.tool);
         const auth = configManager.getAuth();
-        if (!auth.plan || !auth.apiKey) {
+
+        const service = BUILTIN_MCP_SERVICES.find((s) => s.id === serviceId);
+        if (!service) {
+          throw new Error(`Unknown MCP service: ${serviceId}`);
+        }
+
+        if (!auth.plan) {
           printError(
             i18n.t('auth.not_set'),
-            'Run "coder-link auth <provider> <token>" first'
+            'Run "coder-link auth <provider> <token>" first to select a provider'
           );
           process.exit(1);
         }
-        const service = {
-          id: serviceId,
-          name: serviceId,
-          description: '',
-          protocol: 'stdio' as const,
-          command: 'npx',
-          args: [`-y`, `@modelcontextprotocol/server-${serviceId}`, '/'],
-          requiresAuth: false
-        };
-        await toolManager.installMCP('kimi', service, auth.apiKey, auth.plan);
-        console.log(i18n.t('mcp.install_success', { service: serviceId }));
+        if (service.requiresAuth && !auth.apiKey) {
+          throw new Error(`Provider API key is required to install "${serviceId}"`);
+        }
+
+        await toolManager.installMCP(targetTool, service, auth.apiKey || '', auth.plan);
+        console.log(`${i18n.t('mcp.install_success', { service: serviceId })} (${toolLabel(targetTool)})`);
       } catch (error) {
         logger.logError('mcp.install', error);
         printError(
           error instanceof Error ? error.message : String(error),
-          'Check that Node.js and npm are installed correctly'
+          'Check provider auth and tool compatibility'
         );
         process.exit(1);
       }
@@ -556,16 +642,17 @@ program
   )
   .addCommand(new Command('uninstall <service>')
     .description('Uninstall an MCP service')
-    .action(async (serviceId: string) => {
+    .option('-t, --tool <tool>', 'Target tool (defaults to last used MCP-capable tool)')
+    .action(async (serviceId: string, options: { tool?: string }) => {
       try {
-        const { kimiManager } = await import('./lib/kimi-manager.js');
-        await kimiManager.uninstallMCP(serviceId);
-        console.log(i18n.t('mcp.uninstall_success', { service: serviceId }));
+        const targetTool = resolveMcpTool(options.tool);
+        await toolManager.uninstallMCP(targetTool, serviceId);
+        console.log(`${i18n.t('mcp.uninstall_success', { service: serviceId })} (${toolLabel(targetTool)})`);
       } catch (error) {
         logger.logError('mcp.uninstall', error);
         printError(
           error instanceof Error ? error.message : String(error),
-          'Service may not be installed'
+          'Service may not be installed for the selected tool'
         );
         process.exit(1);
       }
@@ -584,12 +671,16 @@ program
       const toolStatuses = [];
       
       for (const tool of tools) {
-        const status = await toolManager.isConfigured(tool);
-        toolStatuses.push({ tool, configured: status });
+        const caps = toolManager.getCapabilities(tool);
+        const status = caps.supportsProviderConfig ? await toolManager.isConfigured(tool) : false;
+        toolStatuses.push({ tool, configured: status, capabilities: caps });
       }
-      
-      const { kimiManager } = await import('./lib/kimi-manager.js');
-      const mcpInstalled = kimiManager.getInstalledMCPs();
+
+      const mcpByTool: Record<string, string[]> = {};
+      for (const tool of tools) {
+        if (!toolManager.getCapabilities(tool).supportsMcp) continue;
+        mcpByTool[tool] = await toolManager.getInstalledMCPs(tool);
+      }
       
       if (options.json) {
         setOutputFormat('json');
@@ -598,7 +689,7 @@ program
           currentProvider: plan || null,
           hasApiKey: !!apiKey,
           tools: toolStatuses,
-          mcps: mcpInstalled
+          mcps: mcpByTool
         });
       } else {
         console.log(i18n.t('doctor.header'));
@@ -612,14 +703,23 @@ program
         }
         console.log('\n' + i18n.t('doctor.tools_header'));
         for (const t of toolStatuses) {
-          console.log(`  ${statusIndicator(t.configured)} ${toolLabel(t.tool)}`);
+          const status = t.capabilities.supportsProviderConfig ? statusIndicator(t.configured) : '○';
+          const suffix = t.capabilities.supportsProviderConfig ? '' : ' (launch only)';
+          console.log(`  ${status} ${toolLabel(t.tool)}${suffix}`);
         }
         console.log('\n' + i18n.t('doctor.mcp_header'));
-        if (mcpInstalled.length === 0) {
+        const entries = Object.entries(mcpByTool);
+        if (entries.length === 0) {
           console.log(`  ${i18n.t('doctor.none')}`);
         } else {
-          for (const id of mcpInstalled) {
-            console.log(`  ${id}`);
+          let hasAny = false;
+          for (const [tool, services] of entries) {
+            if (services.length === 0) continue;
+            hasAny = true;
+            console.log(`  ${toolLabel(tool)}: ${services.join(', ')}`);
+          }
+          if (!hasAny) {
+            console.log(`  ${i18n.t('doctor.none')}`);
           }
         }
       }
@@ -646,18 +746,31 @@ program
       // Tool status summary
       const tools = toolManager.getSupportedTools();
       let configured = 0;
-      let total = tools.length;
-      let toolDetails = [];
+      let total = 0;
+      const toolDetails: Array<{ tool: string; label: string; configured: boolean; supportsProviderConfig: boolean }> = [];
       
       for (const tool of tools) {
-        const isConfigured = await toolManager.isConfigured(tool);
-        if (isConfigured) configured++;
-        toolDetails.push({ tool, label: toolLabel(tool), configured: isConfigured });
+        const caps = toolManager.getCapabilities(tool);
+        const isConfigured = caps.supportsProviderConfig ? await toolManager.isConfigured(tool) : false;
+        if (caps.supportsProviderConfig) {
+          total++;
+          if (isConfigured) configured++;
+        }
+        toolDetails.push({
+          tool,
+          label: toolLabel(tool),
+          configured: isConfigured,
+          supportsProviderConfig: caps.supportsProviderConfig,
+        });
       }
       
       // MCP status
-      const { kimiManager } = await import('./lib/kimi-manager.js');
-      const mcps = kimiManager.getInstalledMCPs();
+      const mcpByTool: Record<string, string[]> = {};
+      for (const tool of tools) {
+        if (!toolManager.getCapabilities(tool).supportsMcp) continue;
+        mcpByTool[tool] = await toolManager.getInstalledMCPs(tool);
+      }
+      const mcpTotal = Object.values(mcpByTool).reduce((sum, ids) => sum + ids.length, 0);
       
       if (options.json) {
         setOutputFormat('json');
@@ -673,8 +786,8 @@ program
             details: toolDetails
           },
           mcps: {
-            count: mcps.length,
-            installed: mcps
+            count: mcpTotal,
+            byTool: mcpByTool
           },
           configPath: configManager.configPath
         });
@@ -695,12 +808,19 @@ program
         
         // Show tool breakdown
         for (const t of toolDetails) {
-          const status = t.configured ? chalk.green('●') : chalk.gray('○');
-          console.log(`  ${status} ${t.label}`);
+          const status = t.supportsProviderConfig
+            ? (t.configured ? chalk.green('●') : chalk.gray('○'))
+            : chalk.gray('○');
+          const suffix = t.supportsProviderConfig ? '' : chalk.gray(' (launch only)');
+          console.log(`  ${status} ${t.label}${suffix}`);
         }
         
-        const mcpStatus = mcps.length > 0 ? chalk.green('●') : chalk.gray('○');
-        console.log(`MCPs: ${mcpStatus} ${mcps.length} installed`);
+        const mcpStatus = mcpTotal > 0 ? chalk.green('●') : chalk.gray('○');
+        console.log(`MCPs: ${mcpStatus} ${mcpTotal} installed`);
+        for (const [tool, services] of Object.entries(mcpByTool)) {
+          if (services.length === 0) continue;
+          console.log(`  ${toolLabel(tool)}: ${services.join(', ')}`);
+        }
         
         console.log(`\nConfig: ${chalk.gray(configManager.configPath)}`);
       }

@@ -5,6 +5,8 @@ import { i18n } from './utils/i18n.js';
 import { toolManager } from './lib/tool-manager.js';
 import { logger } from './utils/logger.js';
 import { BUILTIN_MCP_SERVICES } from './mcp-services.js';
+import { PROVIDER_CHOICES, providerProtocolSummary } from './utils/providers.js';
+import { toolLabel, planLabel } from './utils/brand.js';
 
 export async function runWizard() {
   console.log(`\n${i18n.t('wizard.welcome')}\n`);
@@ -32,28 +34,29 @@ export async function runWizard() {
       type: 'list',
       name: 'plan',
       message: i18n.t('wizard.select_plan'),
-      choices: [
-        { name: 'GLM Coding Plan (Global)', value: 'glm_coding_plan_global' },
-        { name: 'GLM Coding Plan (China)', value: 'glm_coding_plan_china' },
-        { name: 'Kimi', value: 'kimi' },
-        { name: 'OpenRouter', value: 'openrouter' },
-        { name: 'NVIDIA', value: 'nvidia' }
-      ]
+      choices: PROVIDER_CHOICES.map((p) => ({
+        name: `${p.name} [${providerProtocolSummary(p.value)}]`,
+        value: p.value,
+      }))
     }
   ]);
 
   // API key input
+  const isLocalProvider = plan === 'lmstudio';
   const { apiKey } = await inquirer.prompt<{ apiKey: string }>([
     {
       type: 'password',
       name: 'apiKey',
       message: i18n.t('wizard.enter_api_key'),
-      validate: (input: string) => input.trim().length > 0 || i18n.t('cli.error_general', { error: 'API key cannot be empty' })
+      validate: (input: string) => {
+        if (isLocalProvider) return true;
+        return input.trim().length > 0 || i18n.t('cli.error_general', { error: 'API key cannot be empty' });
+      }
     }
   ]);
 
-  const trimmed = apiKey.trim();
-  if (!trimmed) {
+  const trimmed = apiKey.trim() || (isLocalProvider ? 'lmstudio' : '');
+  if (!trimmed && !isLocalProvider) {
     throw new Error('API key cannot be empty');
   }
   configManager.setAuth(plan, trimmed);
@@ -65,7 +68,12 @@ export async function runWizard() {
       type: 'checkbox',
       name: 'selectedTools',
       message: i18n.t('wizard.select_tools'),
-      choices: tools.map(tool => ({ name: tool, value: tool }))
+      choices: tools.map((tool) => {
+        const caps = toolManager.getCapabilities(tool);
+        const mode = caps.supportsProviderConfig ? '' : ' (launch only)';
+        const mcp = caps.supportsMcp ? '' : ' [no MCP]';
+        return { name: `${toolLabel(tool)}${mode}${mcp}`, value: tool };
+      })
     }
   ]);
 
@@ -73,11 +81,20 @@ export async function runWizard() {
   console.log(`\n${i18n.t('wizard.loading_plan')}`);
   for (const tool of selectedTools) {
     try {
-      await toolManager.loadConfig(tool, plan, apiKey.trim());
-      console.log(`  ✓ ${tool}`);
+      const caps = toolManager.getCapabilities(tool);
+      if (!caps.supportsProviderConfig) {
+        console.log(`  ○ ${toolLabel(tool)} (launch-only, skipped provider sync)`);
+        continue;
+      }
+      if (!toolManager.isPlanSupported(tool, plan)) {
+        console.log(`  ✗ ${toolLabel(tool)}: ${planLabel(plan)} is not supported`);
+        continue;
+      }
+      await toolManager.loadConfig(tool, plan, trimmed);
+      console.log(`  ✓ ${toolLabel(tool)}`);
     } catch (error) {
       logger.logError('wizard.loadConfig', error);
-      console.log(`  ✗ ${tool}: ${error instanceof Error ? error.message : String(error)}`);
+      console.log(`  ✗ ${toolLabel(tool)}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -92,29 +109,55 @@ export async function runWizard() {
   ]);
 
   if (manageMCP) {
-    console.log(`\n${i18n.t('mcp.list_header')}`);
-    for (const service of BUILTIN_MCP_SERVICES) {
-      const installed = await toolManager.isMCPInstalled('kimi', service.id);
-      console.log(`  ${installed ? '✓' : ' '} ${service.id}: ${service.name}`);
-    }
+    const mcpCapableTools = selectedTools.filter((tool) => toolManager.getCapabilities(tool).supportsMcp);
+    if (mcpCapableTools.length === 0) {
+      console.log('\nNo selected tools support MCP management. Skipping MCP setup.');
+    } else {
+      const { target } = await inquirer.prompt<{ target: string }>([
+        {
+          type: 'list',
+          name: 'target',
+          message: 'Apply MCP changes to:',
+          choices: [
+            ...mcpCapableTools.map((tool) => ({ name: toolLabel(tool), value: tool })),
+            ...(mcpCapableTools.length > 1
+              ? [{ name: 'All MCP-capable selected tools', value: '__all' }]
+              : []),
+          ],
+        },
+      ]);
 
-    const { installMCPs } = await inquirer.prompt<{ installMCPs: string[] }>([
-      {
-        type: 'checkbox',
-        name: 'installMCPs',
-        message: 'Select MCP services to install:',
-        choices: BUILTIN_MCP_SERVICES.map(s => ({ name: `${s.name} (${s.id})`, value: s.id }))
+      const targetTools = target === '__all' ? mcpCapableTools : [target];
+
+      for (const targetTool of targetTools) {
+        console.log(`\n${i18n.t('mcp.list_header')} (${toolLabel(targetTool)})`);
+        for (const service of BUILTIN_MCP_SERVICES) {
+          const installed = await toolManager.isMCPInstalled(targetTool, service.id);
+          console.log(`  ${installed ? '✓' : ' '} ${service.id}: ${service.name}`);
+        }
       }
-    ]);
 
-    for (const mcpId of installMCPs) {
-      const mcp = BUILTIN_MCP_SERVICES.find(s => s.id === mcpId)!;
-      try {
-        await toolManager.installMCP('kimi', mcp, apiKey.trim(), plan);
-        console.log(`  ✓ ${mcpId} installed`);
-      } catch (error) {
-        logger.logError('wizard.installMCP', error);
-        console.log(`  ✗ ${mcpId}: ${error instanceof Error ? error.message : String(error)}`);
+      const { installMCPs } = await inquirer.prompt<{ installMCPs: string[] }>([
+        {
+          type: 'checkbox',
+          name: 'installMCPs',
+          message: 'Select MCP services to install:',
+          choices: BUILTIN_MCP_SERVICES.map(s => ({ name: `${s.name} (${s.id})`, value: s.id }))
+        }
+      ]);
+
+      for (const targetTool of targetTools) {
+        console.log(`\nInstalling on ${toolLabel(targetTool)}:`);
+        for (const mcpId of installMCPs) {
+          const mcp = BUILTIN_MCP_SERVICES.find(s => s.id === mcpId)!;
+          try {
+            await toolManager.installMCP(targetTool, mcp, trimmed, plan);
+            console.log(`  ✓ ${mcpId} installed`);
+          } catch (error) {
+            logger.logError('wizard.installMCP', error);
+            console.log(`  ✗ ${mcpId}: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }
       }
     }
   }
