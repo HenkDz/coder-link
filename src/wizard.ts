@@ -7,6 +7,12 @@ import { logger } from './utils/logger.js';
 import { BUILTIN_MCP_SERVICES } from './mcp-services.js';
 import { PROVIDER_CHOICES, providerProtocolSummary } from './utils/providers.js';
 import { toolLabel, planLabel } from './utils/brand.js';
+import { printWarning, printInfo, printSuccess } from './utils/output.js';
+import {
+  checkLMStudioStatus,
+  requiresHealthCheck,
+  getLMStudioDefaultPorts,
+} from './lib/provider-registry.js';
 
 export async function runWizard() {
   console.log(`\n${i18n.t('wizard.welcome')}\n`);
@@ -44,6 +50,53 @@ export async function runWizard() {
       }))
     }
   ]);
+
+  // Healthcheck for local providers (Recommendation #1)
+  if (requiresHealthCheck(plan)) {
+    console.log();
+    printInfo(`Checking ${planLabel(plan)} server availability...`);
+    
+    if (plan === 'lmstudio') {
+      const status = await checkLMStudioStatus(undefined, { timeoutMs: 5000 });
+      
+      if (!status.reachable) {
+        const defaultPorts = getLMStudioDefaultPorts();
+        printWarning(
+          `LM Studio server is not reachable on ports ${defaultPorts.join('/')}.`,
+          'Please start LM Studio and load a model before continuing.'
+        );
+        
+        const { continueAnyway } = await inquirer.prompt<{ continueAnyway: boolean }>([
+          {
+            type: 'confirm',
+            name: 'continueAnyway',
+            message: 'Continue with configuration anyway?',
+            default: false,
+          },
+        ]);
+        
+        if (!continueAnyway) {
+          printInfo('Wizard cancelled. Please start LM Studio and try again.');
+          return;
+        }
+      } else if (!status.modelLoaded) {
+        printWarning(
+          `LM Studio is running but no model is loaded.`,
+          'Please load a model in LM Studio before making API calls.'
+        );
+        
+        if (status.actualUrl) {
+          printInfo(`Connected to: ${status.actualUrl}`);
+        }
+      } else {
+        printSuccess(`LM Studio is running with model: ${status.modelId}`);
+        if (status.actualUrl) {
+          printInfo(`Connected to: ${status.actualUrl}`);
+        }
+      }
+    }
+    console.log();
+  }
 
   // API key input
   const isLocalProvider = plan === 'lmstudio';

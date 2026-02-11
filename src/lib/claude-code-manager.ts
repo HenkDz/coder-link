@@ -117,10 +117,16 @@ export class ClaudeCodeManager {
     
     // Set up models for all three tiers (opus, sonnet, haiku)
     // For OpenRouter, keep haiku as a known Anthropic model for background tasks
+    // For GLM providers, use glm-4.7-flash for haiku (faster for background tasks)
+    const getHaikuModel = () => {
+      if (planKey === 'openrouter') return 'anthropic/claude-haiku-4.6';
+      if (planKey === 'glm_coding_plan_global' || planKey === 'glm_coding_plan_china') return 'glm-4.7-flash';
+      return defaultModel;
+    };
     const defaultModels = {
       opus: defaultModel,
       sonnet: defaultModel,
-      haiku: planKey === 'openrouter' ? 'anthropic/claude-haiku-4.6' : defaultModel
+      haiku: getHaikuModel()
     };
 
     const newConfig = {

@@ -6,6 +6,13 @@ import { logger } from '../utils/logger.js';
 import type { MCPService } from './tool-manager.js';
 import type { ProviderOptions } from './tool-manager.js';
 import { readJsonConfig, writeJsonConfig } from './config-io.js';
+import {
+  detectPlanFromUrl,
+  getBaseUrl,
+  getDefaultModel,
+  getProviderDisplayName,
+} from './provider-registry.js';
+import type { Plan } from '../utils/config.js';
 
 const PI_PROVIDER_ID = 'moonshot';
 
@@ -51,19 +58,8 @@ export class PiManager {
       }
 
       if (typeof apiKey === 'string' && apiKey.trim()) {
-        // Detect plan from base_url
-        let plan = 'kimi';
-        if (typeof baseUrl === 'string') {
-          if (baseUrl.includes('openrouter.ai')) {
-            plan = 'openrouter';
-          } else if (baseUrl.includes('nvidia.com')) {
-            plan = 'nvidia';
-          } else if (baseUrl.includes('coding-intl.dashscope.aliyuncs.com')) {
-            plan = 'alibaba';
-          } else if (baseUrl.includes('dashscope') || baseUrl.includes('aliyuncs.com')) {
-            plan = 'alibaba_api';
-          }
-        }
+        // Detect plan from base_url using centralized detection
+        const plan = detectPlanFromUrl(baseUrl) || 'kimi';
         return { plan, apiKey: apiKey.trim(), model };
       }
       return { plan: null, apiKey: null };
@@ -74,12 +70,16 @@ export class PiManager {
   }
 
   async loadConfig(plan: string, apiKey: string, options?: ProviderOptions): Promise<void> {
-    if (!apiKey || !apiKey.trim()) {
+    // LM Studio doesn't require an API key
+    const planKey = plan as Plan;
+    const isLMStudio = planKey === 'lmstudio';
+    
+    if (!isLMStudio && (!apiKey || !apiKey.trim())) {
       throw new Error('API key cannot be empty');
     }
 
-    const baseUrl = options?.baseUrl?.trim() || 'https://api.moonshot.ai/v1';
-    const modelId = options?.model?.trim() || 'moonshot-ai/kimi-k2.5';
+    const baseUrl = options?.baseUrl?.trim() || getBaseUrl(planKey, 'openai');
+    const modelId = options?.model?.trim() || getDefaultModel(planKey);
 
     const source = (options?.source || '').toString().trim().toLowerCase();
     // Pi supported APIs: openai-completions/openai-responses/anthropic-messages/google-generative-ai.

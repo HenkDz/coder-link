@@ -17,6 +17,13 @@ import {
   supportsOpenAIProtocol,
 } from '../utils/providers.js';
 import { createSafeSpinner, pause, providerSummary, selectModelId } from './shared.js';
+import {
+  checkProviderHealth,
+  checkLMStudioStatus,
+  requiresHealthCheck,
+  getConfigurableDefaults,
+  getLMStudioDefaultPorts,
+} from '../lib/provider-registry.js';
 
 function getPlanApiKey(plan: Plan): string {
   const key = configManager.getApiKeyFor(plan)?.trim() || '';
@@ -106,17 +113,118 @@ async function configureProfilesMenu(): Promise<void> {
   }
 }
 
+/**
+ * Perform health check for providers that require it (Recommendation #1)
+ * Returns true if the provider is healthy or doesn't require health check
+ */
+async function performProviderHealthCheck(
+  plan: Plan,
+  baseUrl?: string
+): Promise<{ healthy: boolean; url?: string; message?: string }> {
+  if (!requiresHealthCheck(plan)) {
+    return { healthy: true };
+  }
+
+  const spinner = createSafeSpinner(`Checking ${planLabel(plan)} server availability...`).start();
+
+  try {
+    // For LM Studio, use the detailed status check
+    if (plan === 'lmstudio') {
+      const status = await checkLMStudioStatus(baseUrl, { timeoutMs: 5000 });
+      
+      if (!status.reachable) {
+        const defaultPorts = getLMStudioDefaultPorts();
+        spinner.fail(`${planLabel(plan)} server is not reachable`);
+        return {
+          healthy: false,
+          message: `Could not connect to LM Studio. Make sure it's running on port ${defaultPorts.join(' or ')}.`,
+        };
+      }
+
+      if (!status.modelLoaded) {
+        spinner.warn(`${planLabel(plan)} server is running but no model is loaded`);
+        console.log(chalk.gray(`  Connected to: ${status.actualUrl}`));
+        return {
+          healthy: true,
+          url: status.actualUrl,
+          message: 'LM Studio is running but no model is loaded. Load a model in LM Studio before making API calls.',
+        };
+      }
+
+      spinner.succeed(`${planLabel(plan)} server is running with model: ${status.modelId}`);
+      console.log(chalk.gray(`  Connected to: ${status.actualUrl}`));
+      return { healthy: true, url: status.actualUrl };
+    }
+
+    // Generic health check for other providers
+    const result = await checkProviderHealth(plan, { baseUrl, timeoutMs: 5000 });
+    
+    if (!result.reachable) {
+      spinner.fail(`${planLabel(plan)} server is not reachable`);
+      return { healthy: false, message: result.error || 'Could not connect to server.' };
+    }
+
+    spinner.succeed(`${planLabel(plan)} server is reachable`);
+    return { healthy: true, url: result.url };
+  } catch (error) {
+    spinner.fail(`Health check failed for ${planLabel(plan)}`);
+    const message = error instanceof Error ? error.message : 'Unknown error during health check';
+    return { healthy: false, message };
+  }
+}
+
 export async function providerSetupFlow(plan: Plan): Promise<void> {
   printInfo(`Configuring ${planLabel(plan)} profile...`);
   printInfo(`Protocols: ${providerProtocolSummary(plan)}`);
-  if (plan === 'alibaba') {
+  
+  // Display provider-specific hints
+  if (plan === 'lmstudio') {
+    const defaults = getConfigurableDefaults(plan);
+    if (defaults?.defaultPorts) {
+      printInfo(`Default ports: ${defaults.defaultPorts.join(', ')}`);
+    }
+    printInfo('Make sure LM Studio is running with a model loaded before testing.');
+  } else if (plan === 'alibaba') {
     printInfo('Alibaba Coding Plan uses plan-specific key (sk-sp-*) and coding-intl endpoints.');
   } else if (plan === 'alibaba_api') {
     printInfo('Alibaba API (Singapore) supports OpenAI + Anthropic protocols.');
     printInfo('Defaults: /compatible-mode/v1 (OpenAI) and /apps/anthropic (Anthropic).');
   }
+  
   console.log(chalk.gray("  (Tip: choose Quick Setup for most users)"));
   console.log(chalk.gray("  (Enter 'b' at text prompts to go back)\n"));
+
+  // Perform health check for local providers (Recommendation #1)
+  if (requiresHealthCheck(plan)) {
+    const currentSettings = configManager.getProviderSettings(plan);
+    const healthResult = await performProviderHealthCheck(plan, currentSettings.baseUrl);
+    
+    if (!healthResult.healthy) {
+      printWarning(
+        `Cannot proceed with ${planLabel(plan)} setup.`,
+        healthResult.message || 'Server is not reachable.'
+      );
+      
+      const { continueAnyway } = await inquirer.prompt<{ continueAnyway: boolean }>([
+        {
+          type: 'confirm',
+          name: 'continueAnyway',
+          message: 'Continue with configuration anyway?',
+          default: false,
+        },
+      ]);
+      
+      if (!continueAnyway) {
+        printInfo('Configuration cancelled. Please start the server and try again.');
+        return;
+      }
+    } else if (healthResult.message) {
+      // Health check passed with a warning
+      printWarning(healthResult.message);
+    }
+    
+    console.log();
+  }
 
   const current = configManager.getProviderSettings(plan);
   const { setupMode } = await inquirer.prompt<{ setupMode: 'quick' | 'advanced' | '__back' }>([
@@ -601,4 +709,3 @@ export async function providerMenu(): Promise<void> {
     }
   }
 }
-

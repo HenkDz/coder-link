@@ -7,6 +7,9 @@ import {
   getProviderDisplayName,
   supportsProtocol,
   getMaxContextSize,
+  normalizeLMStudioUrl,
+  resolveProviderBaseUrl,
+  type Protocol,
 } from '../lib/provider-registry.js';
 
 export type ProviderProtocol = 'openai' | 'anthropic';
@@ -76,43 +79,23 @@ export function getDefaultAnthropicModel(plan: Plan): string | undefined {
   return getDefaultModel(plan);
 }
 
+/**
+ * Resolve Anthropic-compatible base URL from OpenAI-compatible URL.
+ * Uses the centralized protocol-agnostic URL resolver (Recommendation #2).
+ * 
+ * @param plan - The provider plan
+ * @param openAiBaseUrl - Optional OpenAI-compatible base URL to derive from
+ * @returns The resolved Anthropic-compatible base URL, or undefined if not supported
+ */
 export function resolveAnthropicBaseUrl(plan: Plan, openAiBaseUrl?: string): string | undefined {
   if (!supportsProtocol(plan, 'anthropic')) return undefined;
   
-  const config = PROVIDER_CONFIGS[plan];
-  const fallback = config.urls.anthropic;
-  
-  if (!openAiBaseUrl?.trim()) return fallback;
-  
-  const normalized = openAiBaseUrl.trim().replace(/\/+$/g, '');
-  const lower = normalized.toLowerCase();
-
-  // Handle provider-specific URL normalization
-  switch (plan) {
-    case 'glm_coding_plan_global':
-    case 'glm_coding_plan_china':
-      if (lower.endsWith('/api/anthropic')) return normalized;
-      if (lower.endsWith('/api/coding/paas/v4')) return normalized.replace(/\/api\/coding\/paas\/v4$/i, '/api/anthropic');
-      return fallback;
-
-    case 'openrouter':
-      if (lower.endsWith('/api/v1')) return normalized.replace(/\/api\/v1$/i, '/api');
-      if (lower.endsWith('/v1')) return normalized.replace(/\/v1$/i, '');
-      if (lower.endsWith('/api')) return normalized;
-      return lower.includes('openrouter.ai') ? `${normalized}/api` : normalized;
-
-    case 'lmstudio':
-      return lower.endsWith('/v1') ? normalized.replace(/\/v1$/i, '') : normalized;
-
-    case 'alibaba':
-    case 'alibaba_api':
-      if (lower.includes('/apps/anthropic')) return normalized;
-      if (lower.includes('/compatible-mode/v1')) return normalized.replace(/\/compatible-mode\/v1$/i, '/apps/anthropic');
-      if (lower.endsWith('/v1')) return normalized.replace(/\/v1$/i, '/apps/anthropic');
-      return fallback;
-
-    default:
-      return fallback;
-  }
+  // Use the generic protocol-agnostic resolver
+  return resolveProviderBaseUrl(plan, 'anthropic', { baseUrl: openAiBaseUrl });
 }
 
+// Re-export the generic resolver for direct use
+export { resolveProviderBaseUrl } from '../lib/provider-registry.js';
+
+// Re-export Protocol type for convenience
+export type { Protocol } from '../lib/provider-registry.js';

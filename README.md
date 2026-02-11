@@ -146,12 +146,12 @@ api_key: your-api-key-here     # API key
 
 ### GLM Coding Plan (Global)
 - **Base URL**: `https://api.z.ai/api/anthropic` (Claude Code) or `https://api.z.ai/api/coding/paas/v4` (others)
-- **Models**: GLM-4.7, GLM-4.6, GLM-4.5-air
+- **Models**: GLM-5, GLM-4.7, GLM-4.6, GLM-4.5-air
 - Get your API key from [Z.AI Open Platform](https://z.ai/model-api)
 
 ### GLM Coding Plan (China)
 - **Base URL**: `https://open.bigmodel.cn/api/anthropic` (Claude Code) or `https://open.bigmodel.cn/api/coding/paas/v4` (others)
-- **Models**: GLM-4.7, GLM-4.6, GLM-4.5-air
+- **Models**: GLM-5, GLM-4.7, GLM-4.6, GLM-4.5-air
 - Get your API key from [Z.AI Open Platform](https://z.ai/model-api)
 
 ### OpenRouter

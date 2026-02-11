@@ -175,7 +175,7 @@ export class CodexManager {
       name: getProviderShortName(plan),
       base_url: baseUrl,
       env_key: OPENAI_ENV_KEY,
-      wire_api: 'chat',
+      wire_api: 'responses',
     };
 
     const newConfig: AnyRecord = {

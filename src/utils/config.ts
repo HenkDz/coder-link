@@ -72,6 +72,10 @@ export interface ProviderConfig {
   anthropic_model?: string;
   provider_id?: string;
   max_context_size?: number;
+  /** LM Studio specific: custom port number (default: 1234) */
+  port?: number;
+  /** LM Studio specific: path to local model directory */
+  localPath?: string;
 }
 
 export interface Config {
@@ -610,16 +614,16 @@ export class ConfigManager {
     glm_coding_plan_global: {
       baseUrl: 'https://api.z.ai/api/coding/paas/v4',
       anthropicBaseUrl: 'https://api.z.ai/api/anthropic',
-      model: 'glm-4',
-      anthropicModel: 'glm-4.7',
+      model: 'glm-5',
+      anthropicModel: 'glm-5',
       source: 'glm-global',
       maxContextSize: 128000,
     },
     glm_coding_plan_china: {
       baseUrl: 'https://open.bigmodel.cn/api/coding/paas/v4',
       anthropicBaseUrl: 'https://open.bigmodel.cn/api/anthropic',
-      model: 'glm-4',
-      anthropicModel: 'glm-4.7',
+      model: 'glm-5',
+      anthropicModel: 'glm-5',
       source: 'glm-china',
       maxContextSize: 128000,
     }
