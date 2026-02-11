@@ -4,6 +4,15 @@ import { homedir } from 'os';
 import { MCPService } from './tool-manager.js';
 import type { ProviderOptions } from './tool-manager.js';
 import { readJsonConfig, writeJsonConfig } from './config-io.js';
+import {
+  getAllPlans,
+  getBaseUrl,
+  getDefaultModel,
+  getProviderDisplayName,
+  getProviderShortName,
+  detectPlanFromUrl,
+} from './provider-registry.js';
+import type { Plan } from '../utils/config.js';
 
 export class OpenCodeManager {
   static instance: OpenCodeManager | null = null;
@@ -29,7 +38,7 @@ export class OpenCodeManager {
     writeJsonConfig(this.configPath, config, 'OpenCodeManager', 4);
   }
 
-  private getProviderName(plan: string): string {
+  private getProviderName(plan: Plan): string {
     // GLM providers use special provider IDs
     if (plan === 'glm_coding_plan_global') return 'zai-coding-plan';
     if (plan === 'glm_coding_plan_china') return 'zhipuai-coding-plan';
@@ -39,49 +48,16 @@ export class OpenCodeManager {
     return plan;
   }
 
-  private isCustomProvider(plan: string): boolean {
+  private isCustomProvider(plan: Plan): boolean {
     // Custom providers (OpenAI-compatible) need full configuration with npm, name, options, models
     // This includes NVIDIA, OpenRouter, Alibaba Coding, LM Studio - any provider using @ai-sdk/openai-compatible
     return plan === 'nvidia' || plan === 'openrouter' || plan === 'alibaba' || plan === 'alibaba_api' || plan === 'lmstudio';
   }
 
-  private getProviderDisplayName(plan: string): string {
-    const names: Record<string, string> = {
-      nvidia: 'NVIDIA NIM',
-      openrouter: 'OpenRouter',
-      alibaba: 'Alibaba Coding',
-      alibaba_api: 'Alibaba API (Singapore)',
-      lmstudio: 'LM Studio (local)',
-      kimi: 'Moonshot AI'
-    };
-    return names[plan] || 'Custom Provider';
-  }
-
-  private getDefaultBaseUrl(plan: string): string {
-    const urls: Record<string, string> = {
-      nvidia: 'https://integrate.api.nvidia.com/v1',
-      openrouter: 'https://openrouter.ai/api/v1',
-      alibaba: 'https://coding-intl.dashscope.aliyuncs.com/v1',
-      alibaba_api: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
-      lmstudio: 'http://localhost:1234/v1'
-    };
-    return urls[plan] || 'http://localhost:1234/v1';
-  }
-
-  private getDefaultModel(plan: string): string {
-    const models: Record<string, string> = {
-      nvidia: 'moonshotai/kimi-k2.5',
-      openrouter: 'kimi-k2.5',
-      alibaba: 'qwen3-coder-plus',
-      alibaba_api: 'qwen3-max-2026-01-23',
-      lmstudio: 'lmstudio-community'
-    };
-    return models[plan] || 'default-model';
-  }
-
   async loadConfig(plan: string, apiKey: string, options?: ProviderOptions): Promise<void> {
+    const planKey = plan as Plan;
     const currentConfig = this.getConfig();
-    const providerName = this.getProviderName(plan);
+    const providerName = this.getProviderName(planKey);
 
     // Remove old provider configuration (if exists)
     // Also exclude old model/small_model to ensure they get properly updated
@@ -104,15 +80,15 @@ export class OpenCodeManager {
     const modelId = options?.model?.trim();
 
     // Add new provider configuration
-    if (this.isCustomProvider(plan)) {
+    if (this.isCustomProvider(planKey)) {
       // OpenAI-compatible providers (NVIDIA, OpenRouter, LM Studio) need full custom structure
       // See: https://opencode.ai/docs/providers/#custom-provider
-      const customBaseUrl = baseUrl || this.getDefaultBaseUrl(plan);
-      const customModelId = modelId || this.getDefaultModel(plan);
+      const customBaseUrl = baseUrl || getBaseUrl(planKey, 'openai');
+      const customModelId = modelId || getDefaultModel(planKey);
       
       newProvider[providerName] = {
         npm: '@ai-sdk/openai-compatible',
-        name: this.getProviderDisplayName(plan),
+        name: getProviderDisplayName(planKey),
         options: {
           apiKey: apiKey,
           baseURL: customBaseUrl
@@ -123,11 +99,11 @@ export class OpenCodeManager {
           }
         }
       };
-    } else if (plan === 'kimi') {
+    } else if (planKey === 'kimi') {
       // Kimi can use either:
       // 1. Built-in moonshot-ai-coding provider (native Moonshot API)
       // 2. Custom OpenAI-compatible provider (when using OpenRouter, etc.)
-      const isNativeMoonshot = !baseUrl || baseUrl === 'https://api.moonshot.ai/v1';
+      const isNativeMoonshot = !baseUrl || baseUrl === getBaseUrl('kimi', 'openai');
 
       if (isNativeMoonshot) {
         // Native Moonshot API supports extended thinking / reasoning mode
@@ -135,7 +111,7 @@ export class OpenCodeManager {
         newProvider[providerName] = {
           options: {
             apiKey: apiKey,
-            baseUrl: baseUrl || 'https://api.moonshot.ai/v1',
+            baseUrl: baseUrl || getBaseUrl('kimi', 'openai'),
             ...(supportsThinking ? {} : { reasoning: false, thinking: false })
           }
         };
@@ -143,7 +119,7 @@ export class OpenCodeManager {
         // Custom baseUrl detected - use OpenAI-compatible format
         // This handles OpenRouter, proxy URLs, etc.
         const customProviderName = 'kimi-custom';
-        const customModelId = modelId || 'kimi-k2.5';
+        const customModelId = modelId || getDefaultModel('kimi');
 
         newProvider[customProviderName] = {
           npm: '@ai-sdk/openai-compatible',
@@ -183,22 +159,7 @@ export class OpenCodeManager {
       };
     }
 
-    // Default models if not provided
-    let defaultModel: string;
-    if (plan === 'kimi' || plan === 'openrouter' || plan === 'nvidia') {
-      defaultModel = 'kimi-k2.5';
-    } else if (plan === 'alibaba') {
-      defaultModel = 'qwen3-coder-plus';
-    } else if (plan === 'alibaba_api') {
-      defaultModel = 'qwen3-max-2026-01-23';
-    } else if (plan === 'lmstudio') {
-      defaultModel = 'lmstudio-community';
-    } else if (plan === 'glm_coding_plan_global') {
-      defaultModel = 'glm-4-coder';
-    } else {
-      defaultModel = 'glm-4-plus';
-    }
-    const targetModel = modelId || defaultModel;
+    const targetModel = modelId || getDefaultModel(planKey);
     
     // OpenCode model strings are typically "<provider>/<model>".
     // For custom providers, use the model ID directly if it doesn't include a slash

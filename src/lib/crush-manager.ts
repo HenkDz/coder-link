@@ -3,6 +3,12 @@ import { homedir } from 'os';
 import { MCPService } from './tool-manager.js';
 import type { ProviderOptions } from './tool-manager.js';
 import { readJsonConfig, writeJsonConfig } from './config-io.js';
+import {
+  getBaseUrl,
+  getProviderDisplayName,
+  detectPlanFromUrl,
+} from './provider-registry.js';
+import type { Plan } from '../utils/config.js';
 
 export class CrushManager {
   static instance: CrushManager | null = null;
@@ -28,34 +34,18 @@ export class CrushManager {
     writeJsonConfig(this.configPath, config, 'CrushManager', 2);
   }
 
-  private getBaseUrl(plan: string, options?: ProviderOptions): string {
+  private resolveBaseUrl(plan: Plan, options?: ProviderOptions): string {
     if (options?.baseUrl?.trim()) {
       return options.baseUrl.trim();
     }
-    if (plan === 'kimi') return 'https://api.moonshot.ai/v1';
-    if (plan === 'openrouter') return 'https://openrouter.ai/api/v1';
-    if (plan === 'nvidia') return 'https://integrate.api.nvidia.com/v1';
-    if (plan === 'alibaba') return 'https://coding-intl.dashscope.aliyuncs.com/v1';
-    if (plan === 'alibaba_api') return 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1';
-    return plan === 'glm_coding_plan_global'
-      ? 'https://api.z.ai/api/coding/paas/v4'
-      : 'https://open.bigmodel.cn/api/coding/paas/v4';
+    return getBaseUrl(plan, 'openai');
   }
 
   async loadConfig(plan: string, apiKey: string, options?: ProviderOptions): Promise<void> {
+    const planKey = plan as Plan;
     const currentConfig = this.getConfig();
-    const baseUrl = this.getBaseUrl(plan, options);
-
-    // Determine provider name for display
-    const providerDisplayName = (plan === 'kimi' || plan === 'openrouter' || plan === 'nvidia' || plan === 'alibaba' || plan === 'alibaba_api')
-      ? (
-        plan === 'alibaba'
-          ? 'Alibaba Coding Provider'
-          : plan === 'alibaba_api'
-            ? 'Alibaba API Provider'
-            : 'Kimi Provider'
-      )
-      : 'ZAI Provider';
+    const baseUrl = this.resolveBaseUrl(planKey, options);
+    const providerDisplayName = getProviderDisplayName(planKey);
 
     const newConfig = {
       ...currentConfig,
@@ -96,22 +86,7 @@ export class CrushManager {
       const zaiProvider = config.providers['zai'];
       const apiKey = zaiProvider.api_key || null;
       const baseUrl = zaiProvider.base_url;
-      let plan: string | null = null;
-      if (baseUrl === 'https://api.z.ai/api/coding/paas/v4') {
-        plan = 'glm_coding_plan_global';
-      } else if (baseUrl === 'https://open.bigmodel.cn/api/coding/paas/v4') {
-        plan = 'glm_coding_plan_china';
-      } else if (baseUrl?.includes('openrouter.ai')) {
-        plan = 'openrouter';
-      } else if (baseUrl?.includes('nvidia.com')) {
-        plan = 'nvidia';
-      } else if (baseUrl?.includes('coding-intl.dashscope.aliyuncs.com') || baseUrl?.includes('aliyuncs.com/apps/anthropic')) {
-        plan = 'alibaba';
-      } else if (baseUrl?.includes('compatible-mode') || baseUrl?.includes('dashscope-intl.aliyuncs.com')) {
-        plan = 'alibaba_api';
-      } else if (baseUrl) {
-        plan = 'kimi';
-      }
+      const plan = detectPlanFromUrl(baseUrl);
       // Crush doesn't store model in provider config
       return { plan, apiKey, model: undefined };
     } catch {

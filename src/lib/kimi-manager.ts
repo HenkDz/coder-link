@@ -6,20 +6,14 @@ import * as TOML from '@iarna/toml';
 import { logger } from '../utils/logger.js';
 import type { MCPService } from './tool-manager.js';
 import type { ProviderOptions } from './tool-manager.js';
+import {
+  getBaseUrl,
+  getDefaultModel,
+  detectPlanFromUrl,
+} from './provider-registry.js';
+import type { Plan } from '../utils/config.js';
 
-const DEFAULT_BASE_URL = 'https://api.moonshot.ai/v1';
 const DEFAULT_PROVIDER_ID = 'managed:moonshot-ai';
-const DEFAULT_MODEL_ID = 'moonshot-ai/kimi-k2.5';
-
-// Known base URLs for provider detection
-const PROVIDER_BASE_URLS: Record<string, string> = {
-  'https://api.moonshot.ai/v1': 'kimi',
-  'https://openrouter.ai/api/v1': 'openrouter',
-  'https://integrate.api.nvidia.com/v1': 'nvidia',
-  'https://coding-intl.dashscope.aliyuncs.com/v1': 'alibaba',
-  'https://dashscope-intl.aliyuncs.com/compatible-mode/v1': 'alibaba_api',
-  'https://dashscope.aliyuncs.com/compatible-mode/v1': 'alibaba_api',
-};
 
 type AnyRecord = Record<string, any>;
 
@@ -101,11 +95,11 @@ export class KimiManager {
     return changed;
   }
 
-  private ensureProvider(config: AnyRecord, apiKey: string, options?: ProviderOptions): void {
+  private ensureProvider(config: AnyRecord, plan: Plan, apiKey: string, options?: ProviderOptions): void {
     config.providers = config.providers && typeof config.providers === 'object' ? config.providers : {};
 
     const providerId = options?.providerId?.trim() || DEFAULT_PROVIDER_ID;
-    const baseUrl = options?.baseUrl?.trim() || DEFAULT_BASE_URL;
+    const baseUrl = options?.baseUrl?.trim() || getBaseUrl(plan, 'openai');
 
     // Use the OpenAI-legacy provider type for all Kimi-compatible endpoints.
     // This keeps requests aligned with OpenAI chat-completions and avoids
@@ -120,11 +114,11 @@ export class KimiManager {
     };
   }
 
-  private ensureModel(config: AnyRecord, options?: ProviderOptions): void {
+  private ensureModel(config: AnyRecord, plan: Plan, options?: ProviderOptions): void {
     config.models = config.models && typeof config.models === 'object' ? config.models : {};
 
     const providerId = options?.providerId?.trim() || DEFAULT_PROVIDER_ID;
-    const modelId = options?.model?.trim() || DEFAULT_MODEL_ID;
+    const modelId = options?.model?.trim() || getDefaultModel(plan);
     const maxCtx = options?.maxContextSize || 262144;
 
     // Always update the model with current values (ensures refresh works)
@@ -145,25 +139,13 @@ export class KimiManager {
       const config = this.readConfig();
       const providers = (config.providers && typeof config.providers === 'object' ? config.providers : {}) as Record<string, any>;
 
-      // Helper to detect plan from base_url
-      const detectPlanFromBaseUrl = (baseUrl: string | undefined): string => {
-        if (!baseUrl) return 'kimi';
-        const normalized = baseUrl.toLowerCase().replace(/\/+$/, '');
-        for (const [url, plan] of Object.entries(PROVIDER_BASE_URLS)) {
-          if (normalized.includes(url.toLowerCase().replace(/\/+$/, ''))) {
-            return plan;
-          }
-        }
-        return 'kimi'; // fallback
-      };
-
       // Get the default model if set
       const defaultModel = typeof config.default_model === 'string' ? config.default_model : undefined;
 
       // Prefer the canonical managed provider id
       const managed = providers[DEFAULT_PROVIDER_ID];
       if (managed && typeof managed === 'object' && typeof managed.api_key === 'string' && managed.api_key.trim()) {
-        const plan = detectPlanFromBaseUrl(managed.base_url);
+        const plan = detectPlanFromUrl(managed.base_url) || 'kimi';
         return { plan, apiKey: managed.api_key.trim(), model: defaultModel };
       }
 
@@ -173,7 +155,7 @@ export class KimiManager {
         if (provider && typeof provider === 'object'
           && (provider.type === 'kimi' || provider.type === 'openai_legacy' || provider.type === 'openai')
           && typeof provider.api_key === 'string' && provider.api_key.trim()) {
-          const plan = detectPlanFromBaseUrl(provider.base_url);
+          const plan = detectPlanFromUrl(provider.base_url) || 'kimi';
           return { plan, apiKey: provider.api_key.trim(), model: defaultModel };
         }
       }
@@ -190,9 +172,10 @@ export class KimiManager {
       throw new Error('API key cannot be empty');
     }
 
+    const planKey = plan as Plan;
     const config = existsSync(this.configPath) ? this.readConfig() : {};
-    this.ensureProvider(config, apiKey.trim(), options);
-    this.ensureModel(config, options);
+    this.ensureProvider(config, planKey, apiKey.trim(), options);
+    this.ensureModel(config, planKey, options);
     this.ensureMcpSilent(config);
 
     // Ensure MCP client defaults exist but do not override user values

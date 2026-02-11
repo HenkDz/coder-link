@@ -6,7 +6,14 @@ import type { Plan } from '../utils/config.js';
 import { MCPService } from './tool-manager.js';
 import type { ProviderOptions } from './tool-manager.js';
 import { readJsonConfig, writeJsonConfig } from './config-io.js';
-import { getDefaultAnthropicModel, resolveAnthropicBaseUrl } from '../utils/providers.js';
+import {
+  getBaseUrl,
+  getDefaultModel,
+  getProviderDisplayName,
+  detectPlanFromUrl,
+  supportsProtocol,
+  supportsThinking,
+} from './provider-registry.js';
 
 /**
  * Claude Code Manager
@@ -86,143 +93,35 @@ export class ClaudeCodeManager {
       ...cleanedEnv
     } = currentEnv;
 
+    const planKey = plan as Plan;
     const preferredModel = options?.anthropicModel?.trim() || options?.model?.trim();
-    const resolvedAnthropicBaseUrl = resolveAnthropicBaseUrl(plan as Plan, options?.baseUrl);
-    const requestedAnthropicBaseUrl = options?.anthropicBaseUrl?.trim() || resolvedAnthropicBaseUrl;
 
     // Claude Code requires Anthropic-compatible API (POST /v1/messages endpoint)
-    // It appends /v1/messages to ANTHROPIC_BASE_URL, so base URL should NOT include /v1
-    let baseUrl: string;
-    
-    // Default models for each provider (opus, sonnet, haiku)
-    // These can be overridden by options.model
-    let defaultModels: { opus: string; sonnet: string; haiku: string };
-    
-    if (plan === 'kimi') {
-      // Kimi/Moonshot only provides OpenAI-compatible API (/v1/chat/completions)
-      // They do NOT support Anthropic's /v1/messages endpoint
+    // Check if this provider supports Anthropic protocol
+    if (!supportsProtocol(planKey, 'anthropic')) {
+      const providerName = getProviderDisplayName(planKey);
       throw new Error(
-        'Claude Code requires an Anthropic-compatible API (/v1/messages). ' +
-        'Kimi/Moonshot only provides OpenAI-compatible API (/v1/chat/completions). ' +
-        'Use a different tool (like OpenCode, Crush, or Pi) for Kimi, or use GLM Coding Plan with Claude Code.'
+        `Claude Code requires an Anthropic-compatible API (/v1/messages). ` +
+        `${providerName} only provides OpenAI-compatible API (/v1/chat/completions). ` +
+        `Use a different tool (like OpenCode, Crush, or Pi) for ${providerName}, or use GLM Coding Plan with Claude Code.`
       );
-    }
-    
-    if (plan === 'lmstudio') {
-      // LM Studio 0.4.1+ provides Anthropic-compatible /v1/messages endpoint
-      // Claude Code appends /v1/messages to ANTHROPIC_BASE_URL
-      // So base URL should be http://localhost:1234 (NOT http://localhost:1234/v1)
-      // See: https://lmstudio.ai/blog/claudecode
-      baseUrl = requestedAnthropicBaseUrl || 'http://localhost:1234';
-      // LM Studio uses whatever model is loaded; auth token is just "lmstudio"
-      defaultModels = {
-        opus: 'local-model',
-        sonnet: 'local-model',
-        haiku: 'local-model'
-      };
-    } else if (plan === 'openrouter') {
-      // OpenRouter supports Anthropic format at /api/v1/messages when base is /api
-      // Claude Code appends /v1/messages, so: openrouter.ai/api + /v1/messages = /api/v1/messages
-      baseUrl = requestedAnthropicBaseUrl || 'https://openrouter.ai/api';
-      // OpenRouter Claude models
-      defaultModels = {
-        opus: 'anthropic/claude-opus-4.6',
-        sonnet: 'anthropic/claude-sonnet-4.6',
-        haiku: 'anthropic/claude-haiku-4.6'
-      };
-    } else if (plan === 'nvidia') {
-      // NVIDIA NIM only provides OpenAI-compatible API
-      throw new Error(
-        'Claude Code requires an Anthropic-compatible API (/v1/messages). ' +
-        'NVIDIA NIM only provides OpenAI-compatible API (/v1/chat/completions). ' +
-        'Use a different tool (like OpenCode, Crush, or Pi) for NVIDIA NIM, or use GLM Coding Plan with Claude Code.'
-      );
-    } else if (plan === 'alibaba') {
-      // Alibaba Coding Plan - Anthropic-compatible endpoint for Claude Code
-      // Claude Code appends /v1/messages, so: /apps/anthropic + /v1/messages = /apps/anthropic/v1/messages
-      baseUrl = requestedAnthropicBaseUrl || 'https://coding-intl.dashscope.aliyuncs.com/apps/anthropic';
-      // Coding Plan currently supports qwen3-coder-plus.
-      defaultModels = {
-        opus: 'qwen3-coder-plus',
-        sonnet: 'qwen3-coder-plus',
-        haiku: 'qwen3-coder-plus'
-      };
-    } else if (plan === 'alibaba_api') {
-      // Alibaba Model Studio API (Singapore) can also expose Anthropic-compatible endpoint.
-      baseUrl = requestedAnthropicBaseUrl || 'https://dashscope-intl.aliyuncs.com/apps/anthropic';
-      defaultModels = {
-        opus: 'qwen3-coder-plus',
-        sonnet: 'qwen3-coder-plus',
-        haiku: 'qwen3-coder-plus'
-      };
-    } else if (plan === 'glm_coding_plan_global') {
-      // GLM Coding Plan Global - use Anthropic-compatible endpoint (NOT the OpenAI endpoint from profile)
-      baseUrl = requestedAnthropicBaseUrl || 'https://api.z.ai/api/anthropic';
-      // GLM models per Z.AI docs: https://docs.z.ai/scenario-example/develop-tools/claude
-      defaultModels = {
-        opus: 'glm-4.7',
-        sonnet: 'glm-4.7',
-        haiku: 'glm-4.5-air'
-      };
-    } else if (plan === 'glm_coding_plan_china') {
-      // GLM Coding Plan China - use Anthropic-compatible endpoint (NOT the OpenAI endpoint from profile)
-      baseUrl = requestedAnthropicBaseUrl || 'https://open.bigmodel.cn/api/anthropic';
-      // GLM models per Z.AI docs
-      defaultModels = {
-        opus: 'glm-4.7',
-        sonnet: 'glm-4.7',
-        haiku: 'glm-4.5-air'
-      };
-    } else if (options?.baseUrl?.trim() || options?.anthropicBaseUrl?.trim()) {
-      // Custom/unknown provider - use provided URL as-is
-      baseUrl = requestedAnthropicBaseUrl || options.baseUrl!.trim();
-      // Use provided model or fallback
-      const customModel = preferredModel || 'claude-sonnet-4-5-20250929';
-      defaultModels = {
-        opus: customModel,
-        sonnet: customModel,
-        haiku: customModel
-      };
-    } else {
-      // Fallback (should not reach here for known plans)
-      baseUrl = 'https://api.z.ai/api/anthropic';
-      defaultModels = {
-        opus: 'glm-4.7',
-        sonnet: 'glm-4.7',
-        haiku: 'glm-4.5-air'
-      };
     }
 
-    // If user specified a model, use it for opus/sonnet
-    // Note: For OpenRouter, we keep haiku as a known Anthropic model because
-    // Claude Code validates haiku more strictly for background tasks
-    if (preferredModel) {
-      const model = preferredModel;
-      if (plan === 'openrouter') {
-        // OpenRouter: preserve haiku as Anthropic model, use custom model for opus/sonnet
-        defaultModels = {
-          opus: model,
-          sonnet: model,
-          haiku: 'anthropic/claude-haiku-4.6'  // Keep Anthropic model for background tasks
-        };
-      } else {
-        // Other providers: use custom model for all three
-        defaultModels = {
-          opus: model,
-          sonnet: model,
-          haiku: model
-        };
-      }
-    } else {
-      const fallbackAnthropicModel = getDefaultAnthropicModel(plan as Plan);
-      if (fallbackAnthropicModel) {
-        defaultModels = {
-          opus: defaultModels.opus || fallbackAnthropicModel,
-          sonnet: defaultModels.sonnet || fallbackAnthropicModel,
-          haiku: defaultModels.haiku || fallbackAnthropicModel,
-        };
-      }
-    }
+    // Get base URL from registry or options
+    const baseUrl = options?.anthropicBaseUrl?.trim() || 
+                    options?.baseUrl?.trim() || 
+                    getBaseUrl(planKey, 'anthropic');
+
+    // Get default model from registry or use preferred model
+    const defaultModel = preferredModel || getDefaultModel(planKey);
+    
+    // Set up models for all three tiers (opus, sonnet, haiku)
+    // For OpenRouter, keep haiku as a known Anthropic model for background tasks
+    const defaultModels = {
+      opus: defaultModel,
+      sonnet: defaultModel,
+      haiku: planKey === 'openrouter' ? 'anthropic/claude-haiku-4.6' : defaultModel
+    };
 
     const newConfig = {
       ...currentSettings,
@@ -287,38 +186,7 @@ export class ClaudeCodeManager {
       }
 
       const baseUrl = env.ANTHROPIC_BASE_URL;
-      let plan: string | null = null;
-      
-      // GLM endpoints
-      if (baseUrl === 'https://api.z.ai/api/anthropic') {
-        plan = 'glm_coding_plan_global';
-      } else if (baseUrl === 'https://open.bigmodel.cn/api/anthropic') {
-        plan = 'glm_coding_plan_china';
-      } else if (baseUrl?.includes('openrouter.ai')) {
-        // OpenRouter - base is typically https://openrouter.ai/api
-        plan = 'openrouter';
-      } else if (baseUrl?.includes('localhost:1234') || baseUrl?.includes('127.0.0.1:1234')) {
-        // LM Studio local server (default port 1234)
-        plan = 'lmstudio';
-      } else if (baseUrl?.includes('coding-intl.dashscope.aliyuncs.com')) {
-        // Alibaba Coding Plan endpoint
-        plan = 'alibaba';
-      } else if (baseUrl?.includes('dashscope-intl.aliyuncs.com/apps/anthropic') || baseUrl?.includes('dashscope.aliyuncs.com/apps/anthropic')) {
-        // Anthropic-compatible endpoint can be used by either Coding Plan or API profile.
-        plan = typeof apiKey === 'string' && apiKey.startsWith('sk-sp-') ? 'alibaba' : 'alibaba_api';
-      } else if (baseUrl?.includes('compatible-mode') || baseUrl?.includes('dashscope')) {
-        // Alibaba API / other DashScope endpoint
-        plan = 'alibaba_api';
-      } else if (baseUrl?.includes('nvidia.com')) {
-        // NVIDIA - should not work but detect anyway
-        plan = 'nvidia';
-      } else if (baseUrl?.includes('moonshot.ai') || baseUrl?.includes('kimi')) {
-        // Kimi/Moonshot - should not work but detect anyway
-        plan = 'kimi';
-      } else if (baseUrl) {
-        // Custom endpoint - treat as kimi-like for detection purposes
-        plan = 'kimi';
-      }
+      const plan = detectPlanFromUrl(baseUrl);
       
       // Return the sonnet model as the primary model (used for display)
       // Claude Code uses sonnet as the default
