@@ -29,12 +29,16 @@ export async function runWizard() {
   i18n.setLang(lang);
 
   // Plan selection
+  const enabledProviders = new Set(configManager.getEnabledProviders());
+  const visibleProviders = PROVIDER_CHOICES.filter((p) => enabledProviders.has(p.value));
+  const providerChoices = visibleProviders.length ? visibleProviders : PROVIDER_CHOICES;
+
   const { plan } = await inquirer.prompt<{ plan: Plan }>([
     {
       type: 'list',
       name: 'plan',
       message: i18n.t('wizard.select_plan'),
-      choices: PROVIDER_CHOICES.map((p) => ({
+      choices: providerChoices.map((p) => ({
         name: `${p.name} [${providerProtocolSummary(p.value)}]`,
         value: p.value,
       }))
@@ -62,13 +66,16 @@ export async function runWizard() {
   configManager.setAuth(plan, trimmed);
 
   // Tool selection
-  const tools = toolManager.getSupportedTools();
+  const enabledTools = new Set(configManager.getEnabledTools());
+  const allTools = toolManager.getSupportedTools();
+  const tools = allTools.filter((tool) => enabledTools.has(tool));
+  const visibleTools = tools.length ? tools : allTools;
   const { selectedTools } = await inquirer.prompt<{ selectedTools: string[] }>([
     {
       type: 'checkbox',
       name: 'selectedTools',
       message: i18n.t('wizard.select_tools'),
-      choices: tools.map((tool) => {
+      choices: visibleTools.map((tool) => {
         const caps = toolManager.getCapabilities(tool);
         const mode = caps.supportsProviderConfig ? '' : ' (launch only)';
         const mcp = caps.supportsMcp ? '' : ' [no MCP]';

@@ -1,6 +1,6 @@
 {
   "name": "coder-link",
-  "version": "0.0.9",
+  "version": "0.1.0",
   "description": "Coder Link: connect coding tools to any model/provider",
   "main": "dist/index.js",
   "bin": {

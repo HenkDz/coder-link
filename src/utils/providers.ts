@@ -13,7 +13,8 @@ export const PROVIDER_CHOICES: ProviderChoice[] = [
   { name: 'Kimi (Moonshot)', value: 'kimi' },
   { name: 'OpenRouter', value: 'openrouter' },
   { name: 'NVIDIA NIM', value: 'nvidia' },
-  { name: 'Alibaba Cloud (DashScope)', value: 'alibaba' },
+  { name: 'Alibaba Coding Plan (Monthly)', value: 'alibaba' },
+  { name: 'Alibaba Model Studio API (Singapore)', value: 'alibaba_api' },
   { name: 'LM Studio (Local)', value: 'lmstudio' },
 ];
 
@@ -27,6 +28,7 @@ export const PROVIDER_PROTOCOLS: Record<Plan, { openai: boolean; anthropic: bool
   nvidia: { openai: true, anthropic: false },
   lmstudio: { openai: true, anthropic: true },
   alibaba: { openai: true, anthropic: true },
+  alibaba_api: { openai: true, anthropic: true },
 };
 
 const ANTHROPIC_BASE_DEFAULTS: Partial<Record<Plan, string>> = {
@@ -34,7 +36,8 @@ const ANTHROPIC_BASE_DEFAULTS: Partial<Record<Plan, string>> = {
   glm_coding_plan_china: 'https://open.bigmodel.cn/api/anthropic',
   openrouter: 'https://openrouter.ai/api',
   lmstudio: 'http://localhost:1234',
-  alibaba: 'https://dashscope-intl.aliyuncs.com/apps/anthropic',
+  alibaba: 'https://coding-intl.dashscope.aliyuncs.com/apps/anthropic',
+  alibaba_api: 'https://dashscope-intl.aliyuncs.com/apps/anthropic',
 };
 
 const ANTHROPIC_MODEL_DEFAULTS: Partial<Record<Plan, string>> = {
@@ -43,6 +46,7 @@ const ANTHROPIC_MODEL_DEFAULTS: Partial<Record<Plan, string>> = {
   openrouter: 'anthropic/claude-sonnet-4.6',
   lmstudio: 'local-model',
   alibaba: 'qwen3-coder-plus',
+  alibaba_api: 'qwen3-coder-plus',
 };
 
 export const COMMON_MODELS: Record<Plan, string[]> = {
@@ -50,6 +54,7 @@ export const COMMON_MODELS: Record<Plan, string[]> = {
   openrouter: ['openrouter/pony-alpha', 'anthropic/claude-opus-4.6', 'qwen/qwen3-coder-next'],
   nvidia: ['moonshotai/kimi-k2.5', 'deepseek-ai/deepseek-v3.2', 'meta/llama-3.3-70b-instruct', 'meta/llama-4-maverick-17b-128e-instruct', 'qwen/qwen3-coder-480b-a35b-instruct', 'z-ai/glm4.7', 'nvidia/llama-3.3-nemotron-super-49b-v1.5'],
   alibaba: ['qwen3-coder-plus', 'qwen3-max', 'qwen3-max-preview', 'qwen-plus', 'qwen-flash', 'qwen-turbo', 'qwen3-coder-flash'],
+  alibaba_api: ['qwen3-max-2026-01-23', 'qwen3-max', 'qwen-plus', 'qwen-turbo', 'qwen3-coder-plus'],
   lmstudio: ['lmstudio-community', 'deepseek-coder-v3', 'codellama/13b', 'mistral-7b-instruct', 'qwen2.5-coder-7b'],
   glm_coding_plan_global: ['glm-4.7', 'glm-4-coder', 'glm-4-plus', 'glm-4-air', 'glm-4-flash'],
   glm_coding_plan_china: ['glm-4.7', 'glm-4-coder', 'glm-4-plus', 'glm-4-air', 'glm-4-flash'],
@@ -128,8 +133,19 @@ export function resolveAnthropicBaseUrl(plan: Plan, openAiBaseUrl?: string): str
   }
 
   if (plan === 'alibaba') {
+    if (lower.endsWith('/v1')) return normalized.replace(/\/v1$/i, '/apps/anthropic');
+    if (lower.includes('/coding-intl.dashscope.aliyuncs.com/apps/anthropic')) return normalized;
     if (lower.includes('/apps/anthropic')) return normalized;
     if (lower.includes('/compatible-mode/v1')) return normalized.replace(/\/compatible-mode\/v1$/i, '/apps/anthropic');
+    return fallback;
+  }
+
+  if (plan === 'alibaba_api') {
+    if (lower.includes('/apps/anthropic')) return normalized;
+    if (lower.includes('/compatible-mode/v1')) {
+      return normalized.replace(/\/compatible-mode\/v1$/i, '/apps/anthropic');
+    }
+    if (lower.endsWith('/v1')) return normalized.replace(/\/v1$/i, '/apps/anthropic');
     return fallback;
   }
 

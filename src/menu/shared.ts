@@ -74,6 +74,8 @@ export function startCommand(tool: string): { cmd: string; args: string[] } {
       return { cmd: 'amp', args: [] };
     case 'pi':
       return { cmd: 'pi', args: [] };
+    case 'codex':
+      return { cmd: 'codex', args: [] };
     default:
       return { cmd: tool, args: [] };
   }
@@ -101,6 +103,8 @@ export function installHint(tool: string): { label: string; command?: string } {
       return { label: 'Open Crush install page', command: openUrlCommand('https://crush.ai/') };
     case 'factory-droid':
       return { label: 'Open Factory Droid install page', command: openUrlCommand('https://factory.ai/') };
+    case 'codex':
+      return { label: 'Install Codex CLI', command: 'npm install -g @openai/codex' };
     default:
       return { label: 'Install instructions', command: undefined };
   }

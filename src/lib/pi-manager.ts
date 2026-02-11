@@ -58,6 +58,10 @@ export class PiManager {
             plan = 'openrouter';
           } else if (baseUrl.includes('nvidia.com')) {
             plan = 'nvidia';
+          } else if (baseUrl.includes('coding-intl.dashscope.aliyuncs.com')) {
+            plan = 'alibaba';
+          } else if (baseUrl.includes('dashscope') || baseUrl.includes('aliyuncs.com')) {
+            plan = 'alibaba_api';
           }
         }
         return { plan, apiKey: apiKey.trim(), model };
@@ -88,6 +92,8 @@ export class PiManager {
     const modelName = (() => {
       if (source === 'nvidia') return 'Kimi K2.5 (NVIDIA)';
       if (source === 'openrouter') return 'Kimi K2.5 (OpenRouter)';
+      if (source === 'alibaba') return 'Qwen3 Coder Plus (Alibaba)';
+      if (source === 'alibaba-api-sg') return 'Qwen3 Max (Alibaba API)';
       if (source === 'glm-global') return 'GLM (Global)';
       if (source === 'glm-china') return 'GLM (China)';
       if (source === 'custom') return 'Custom Model';

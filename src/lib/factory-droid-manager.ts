@@ -4,15 +4,214 @@ import { MCPService } from './tool-manager.js';
 import type { ProviderOptions } from './tool-manager.js';
 import { readJsonConfig, writeJsonConfig } from './config-io.js';
 
+// ============================================================================
+// Provider Configuration Map - Single source of truth for all provider metadata
+// ============================================================================
+
+interface ProtocolUrls {
+  anthropic?: string;
+  openai: string;
+}
+
+interface ProviderMetadata {
+  /** Human-readable display name */
+  displayName: string;
+  /** Default model for this provider */
+  defaultModel: string;
+  /** URL configuration - either a single URL object or protocol-specific URLs */
+  urls: ProtocolUrls;
+  /** Whether this provider only supports OpenAI protocol (no Anthropic) */
+  openaiOnly?: boolean;
+  /** URL patterns used to detect this provider from a baseUrl */
+  detectionPatterns: string[];
+  /** Third-party source names that route through this provider */
+  sourceNames?: Record<string, string>;
+  /** Function to calculate max output tokens based on model */
+  getMaxOutputTokens?: (model: string) => number;
+  /** Default context size */
+  defaultContextSize?: number;
+}
+
+const DEFAULT_MAX_TOKENS = 131072;
+const DEFAULT_CONTEXT_SIZE = 262144;
+
+/**
+ * Centralized provider configuration.
+ * All provider-specific data lives here - no more scattered if-else chains!
+ */
+const PROVIDER_METADATA: Record<string, ProviderMetadata> = {
+  kimi: {
+    displayName: 'Kimi',
+    defaultModel: 'moonshotai/kimi-k2.5',
+    urls: { openai: 'https://api.moonshot.ai/v1' },
+    detectionPatterns: ['api.moonshot.ai', 'moonshot.ai'],
+    sourceNames: {
+      moonshot: 'Kimi',
+      openrouter: 'OpenRouter',
+      nvidia: 'NVIDIA NIM',
+      alibaba: 'Alibaba Coding',
+      'alibaba-api-sg': 'Alibaba API (SG)',
+    },
+    defaultContextSize: DEFAULT_CONTEXT_SIZE,
+  },
+
+  openrouter: {
+    displayName: 'OpenRouter',
+    defaultModel: 'moonshotai/kimi-k2.5',
+    urls: {
+      anthropic: 'https://openrouter.ai/api',
+      openai: 'https://openrouter.ai/api/v1',
+    },
+    detectionPatterns: ['openrouter.ai'],
+    sourceNames: { openrouter: 'OpenRouter' },
+    defaultContextSize: DEFAULT_CONTEXT_SIZE,
+  },
+
+  nvidia: {
+    displayName: 'NVIDIA NIM',
+    defaultModel: 'moonshotai/kimi-k2.5',
+    urls: { openai: 'https://integrate.api.nvidia.com/v1' },
+    detectionPatterns: ['nvidia.com', 'integrate.api.nvidia.com'],
+    sourceNames: { nvidia: 'NVIDIA NIM' },
+    defaultContextSize: DEFAULT_CONTEXT_SIZE,
+  },
+
+  alibaba: {
+    displayName: 'Alibaba Coding',
+    defaultModel: 'qwen3-coder-plus',
+    urls: {
+      anthropic: 'https://coding-intl.dashscope.aliyuncs.com/apps/anthropic',
+      openai: 'https://coding-intl.dashscope.aliyuncs.com/v1',
+    },
+    detectionPatterns: ['coding-intl.dashscope.aliyuncs.com', 'aliyuncs.com/apps/anthropic'],
+    sourceNames: { alibaba: 'Alibaba Coding' },
+    defaultContextSize: DEFAULT_CONTEXT_SIZE,
+  },
+
+  alibaba_api: {
+    displayName: 'Alibaba API (SG)',
+    defaultModel: 'qwen3-max-2026-01-23',
+    urls: { openai: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1' },
+    openaiOnly: true,
+    detectionPatterns: ['compatible-mode', 'dashscope-intl.aliyuncs.com'],
+    sourceNames: { 'alibaba-api-sg': 'Alibaba API (SG)' },
+    getMaxOutputTokens: (model: string) =>
+      model.includes('qwen3-max') ? 65536 : DEFAULT_MAX_TOKENS,
+    defaultContextSize: DEFAULT_CONTEXT_SIZE,
+  },
+
+  glm_coding_plan_global: {
+    displayName: 'GLM Coding Plan Global',
+    defaultModel: 'glm-4-coder',
+    urls: {
+      anthropic: 'https://api.z.ai/api/anthropic',
+      openai: 'https://api.z.ai/api/coding/paas/v4',
+    },
+    detectionPatterns: ['api.z.ai', 'z.ai/api'],
+    defaultContextSize: DEFAULT_CONTEXT_SIZE,
+  },
+
+  glm_coding_plan_china: {
+    displayName: 'GLM Coding Plan China',
+    defaultModel: 'glm-4-coder',
+    urls: {
+      anthropic: 'https://open.bigmodel.cn/api/anthropic',
+      openai: 'https://open.bigmodel.cn/api/coding/paas/v4',
+    },
+    detectionPatterns: ['open.bigmodel.cn', 'bigmodel.cn/api'],
+    defaultContextSize: DEFAULT_CONTEXT_SIZE,
+  },
+};
+
+/** Providers that support third-party sources (kimi can be accessed through openrouter, nvidia, etc.) */
+const THIRD_PARTY_SOURCE_PROVIDERS = new Set(['kimi', 'openrouter', 'nvidia', 'alibaba', 'alibaba_api']);
+
+/** Providers that only support OpenAI protocol */
+const OPENAI_ONLY_PROVIDERS = new Set(['kimi', 'nvidia', 'alibaba_api']);
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+/** Get provider metadata by plan name */
+function getProviderMetadata(plan: string): ProviderMetadata | undefined {
+  return PROVIDER_METADATA[plan];
+}
+
+/** Get the appropriate base URL for a provider and protocol */
+function getProviderBaseUrl(
+  provider: ProviderMetadata,
+  protocol: 'anthropic' | 'openai'
+): string {
+  return protocol === 'anthropic' && provider.urls.anthropic
+    ? provider.urls.anthropic
+    : provider.urls.openai;
+}
+
+/** Check if a provider should have an Anthropic protocol entry */
+function supportsAnthropicProtocol(plan: string): boolean {
+  return !OPENAI_ONLY_PROVIDERS.has(plan);
+}
+
+/** Get the default model for a provider */
+function getDefaultModel(plan: string): string {
+  const provider = getProviderMetadata(plan);
+  return provider?.defaultModel ?? 'glm-4-coder';
+}
+
+/** Extract display name from source or provider */
+function getSourceDisplayName(plan: string, source?: string): string {
+  const provider = getProviderMetadata(plan);
+  if (!provider?.sourceNames) return provider?.displayName ?? 'Unknown';
+
+  const normalizedSource = (source ?? '').toLowerCase().trim();
+  return provider.sourceNames[normalizedSource] ?? provider.displayName;
+}
+
+/** Detect plan from base URL using patterns */
+function detectPlanFromBaseUrl(baseUrl: string): string | null {
+  for (const [plan, metadata] of Object.entries(PROVIDER_METADATA)) {
+    if (metadata.detectionPatterns.some((pattern) => baseUrl.includes(pattern))) {
+      return plan;
+    }
+  }
+  // Fallback: if no pattern matches but URL exists, assume kimi (moonshot API compatible)
+  return baseUrl ? 'kimi' : null;
+}
+
+/** Get max output tokens for a model */
+function getMaxOutputTokens(plan: string, model: string): number {
+  const provider = getProviderMetadata(plan);
+  if (provider?.getMaxOutputTokens) {
+    return provider.getMaxOutputTokens(model);
+  }
+  return model.includes('qwen3-max') ? 65536 : DEFAULT_MAX_TOKENS;
+}
+
+/** Get max context size for a provider */
+function getMaxContextSize(plan: string): number {
+  return getProviderMetadata(plan)?.defaultContextSize ?? DEFAULT_CONTEXT_SIZE;
+}
+
+/** Check if a display name suggests "reasoning/thinking" capability */
+function supportsThinking(plan: string, source?: string): boolean {
+  // Only native Moonshot API (kimi without source or with moonshot source) supports extended thinking
+  if (plan !== 'kimi') return false;
+  const normalizedSource = (source ?? '').toLowerCase().trim();
+  return normalizedSource === '' || normalizedSource === 'moonshot';
+}
+
+// ============================================================================
+// Main Class
+// ============================================================================
+
 export class FactoryDroidManager {
   static instance: FactoryDroidManager | null = null;
   private configPath: string;
   private mcpConfigPath: string;
 
   constructor() {
-    // Factory Droid 配置文件路径
     this.configPath = join(homedir(), '.factory', 'settings.json');
-    // Factory Droid MCP 配置文件路径 (单独文件)
     this.mcpConfigPath = join(homedir(), '.factory', 'mcp.json');
   }
 
@@ -22,6 +221,10 @@ export class FactoryDroidManager {
     }
     return FactoryDroidManager.instance;
   }
+
+  // --------------------------------------------------------------------------
+  // Config I/O
+  // --------------------------------------------------------------------------
 
   private getConfig() {
     return readJsonConfig(this.configPath, 'FactoryDroidManager.config');
@@ -39,123 +242,179 @@ export class FactoryDroidManager {
     writeJsonConfig(this.mcpConfigPath, config, 'FactoryDroidManager.mcp', 2);
   }
 
-  private getBaseUrl(plan: string, protocol: 'anthropic' | 'openai', options?: ProviderOptions): string {
+  // --------------------------------------------------------------------------
+  // Base URL Resolution
+  // --------------------------------------------------------------------------
+
+  private getBaseUrl(
+    plan: string,
+    protocol: 'anthropic' | 'openai',
+    options?: ProviderOptions
+  ): string {
+    // Priority 1: Protocol-specific custom URL (for anthropic)
+    if (protocol === 'anthropic' && options?.anthropicBaseUrl?.trim()) {
+      return options.anthropicBaseUrl.trim();
+    }
+
+    // Priority 2: Generic custom base URL
     if (options?.baseUrl?.trim()) {
-      const url = options.baseUrl.trim();
-      // If user provided a base URL, they might want to use it for both protocols, 
-      // but usually the generic-chat-completion-api works best with OpenAI-like paths.
-      return url;
+      return options.baseUrl.trim();
     }
-    if (plan === 'kimi') {
-      return 'https://api.moonshot.ai/v1';
+
+    // Priority 3: Lookup from centralized provider configuration
+    const provider = getProviderMetadata(plan);
+    if (provider) {
+      return getProviderBaseUrl(provider, protocol);
     }
-    if (protocol === 'anthropic') {
-      return plan === 'glm_coding_plan_global'
-        ? 'https://api.z.ai/api/anthropic'
-        : 'https://open.bigmodel.cn/api/anthropic';
-    } else {
-      return plan === 'glm_coding_plan_global'
-        ? 'https://api.z.ai/api/coding/paas/v4'
-        : 'https://open.bigmodel.cn/api/coding/paas/v4';
-    }
+
+    return '';
   }
 
-  private getDisplayName(plan: string, protocol: 'anthropic' | 'openai', options?: ProviderOptions): string {
-    const targetModel = options?.model?.trim() || (plan === 'kimi' ? 'moonshotai/kimi-k2.5' : 'glm-4-coder');
+  // --------------------------------------------------------------------------
+  // Display Name Generation
+  // --------------------------------------------------------------------------
+
+  private getDisplayName(
+    plan: string,
+    protocol: 'anthropic' | 'openai',
+    options?: ProviderOptions
+  ): string {
+    const targetModel = options?.model?.trim() || getDefaultModel(plan);
     const modelName = this.extractModelName(targetModel);
-    
-    // For kimi-like providers, use the actual source for the display name
-    if (plan === 'kimi' || plan === 'openrouter' || plan === 'nvidia') {
-      const source = (options?.source || '').toString().trim().toLowerCase();
-      const providerName = source === 'openrouter' ? 'OpenRouter' 
-        : source === 'nvidia' ? 'NVIDIA NIM' 
-        : 'Kimi';
-      const protocolName = protocol === 'anthropic' ? 'Anthropic' : 'OpenAI';
+    const protocolName = protocol === 'anthropic' ? 'Anthropic' : 'OpenAI';
+
+    // For providers with third-party sources, use the source name
+    if (THIRD_PARTY_SOURCE_PROVIDERS.has(plan)) {
+      const providerName = getSourceDisplayName(plan, options?.source);
       return `${providerName} - ${modelName} [${protocolName}]`;
     }
-    const planName = plan === 'glm_coding_plan_global' ? 'GLM Coding Plan Global' : 'GLM Coding Plan China';
-    const protocolName = protocol === 'anthropic' ? 'Anthropic' : 'OpenAI';
+
+    // For standard GLM plans
+    const provider = getProviderMetadata(plan);
+    const planName = provider?.displayName ?? 'Unknown Plan';
     return `${planName} - ${modelName} [${protocolName}]`;
   }
 
   private toCustomModelId(displayName: string, index: number): string {
-    const slug = displayName
-      .trim()
-      .replace(/\s/g, '-');
+    const slug = displayName.trim().replace(/\s/g, '-');
     return `custom:${slug}-${index}`;
   }
 
   private extractModelName(modelId: string): string {
     const parts = modelId.split('/');
-    if (parts.length > 1) {
-      return parts[parts.length - 1];
-    }
-    return modelId;
+    return parts.length > 1 ? parts[parts.length - 1] : modelId;
   }
 
-  async loadConfig(plan: string, apiKey: string, options?: ProviderOptions): Promise<void> {
+  // --------------------------------------------------------------------------
+  // Config Loading
+  // --------------------------------------------------------------------------
+
+  async loadConfig(
+    plan: string,
+    apiKey: string,
+    options?: ProviderOptions
+  ): Promise<void> {
     const currentConfig = this.getConfig();
+    const targetModel = options?.model?.trim() || getDefaultModel(plan);
 
-    const targetModel = options?.model?.trim() || (plan === 'kimi' ? 'moonshotai/kimi-k2.5' : 'glm-4-coder');
-    // For Kimi/NVIDIA/OpenRouter, we use the provided/detected baseUrl. 
-    // For GLM, we might still want to use the dual-protocol endpoints if no override is provided.
-    const baseUrl = options?.baseUrl?.trim() || (plan === 'kimi' ? 'https://api.moonshot.ai/v1' : this.getBaseUrl(plan, 'openai', options));
+    // Calculate base URL (with fallback)
+    const baseUrl =
+      options?.baseUrl?.trim() ??
+      (plan === 'kimi'
+        ? 'https://api.moonshot.ai/v1'
+        : this.getBaseUrl(plan, 'openai', options));
 
-    // Filter out old GLM/Kimi/OpenRouter/NVIDIA Coding Plan configurations (by displayName)
-    // This ensures refresh properly updates the config
-    const existingModels = (currentConfig.customModels || []).filter(
-      (m: any) => !m.displayName.includes('GLM Coding Plan') 
-        && !m.displayName.includes('Kimi')
-        && !m.displayName.includes('OpenRouter')
-        && !m.displayName.includes('NVIDIA')
+    // Filter out old configurations
+    const displayNameFilters = Object.values(PROVIDER_METADATA).map((p) => p.displayName);
+    const existingModels = (currentConfig.customModels || []).filter((m: any) =>
+      displayNameFilters.every((filter) => !m.displayName?.includes(filter))
     );
 
-    // Kimi (Moonshot / OpenRouter / NVIDIA NIM) is OpenAI Chat Completions compatible.
-    // Don't write an Anthropic entry for Kimi, and keep provider values within Factory's supported set.
-    if (plan === 'kimi') {
-      const source = (options?.source || '').toString().trim().toLowerCase();
-      // Only the native Moonshot API supports extended thinking / reasoning mode.
-      const supportsThinking = (source === '' || source === 'moonshot');
-      const displayName = this.getDisplayName(plan, 'openai', options);
-      const modelName = this.extractModelName(targetModel);
-      const openaiModel: Record<string, any> = {
-        displayName,
-        name: modelName,
-        model: targetModel,
-        baseUrl: baseUrl,
+    // Handle OpenAI-only providers (kimi, alibaba_api)
+    if (OPENAI_ONLY_PROVIDERS.has(plan)) {
+      await this.loadOpenAIOnlyProvider(
+        currentConfig,
+        existingModels,
+        plan,
         apiKey,
-        provider: 'generic-chat-completion-api',
-        maxOutputTokens: 131072,
-        maxContextSize: options?.maxContextSize || 262144,
-      };
-      if (!supportsThinking) {
-        openaiModel.thinking = false;
-        openaiModel.reasoning = false;
-      }
-
-      const customModels = [...existingModels, openaiModel];
-      const modelIndex = customModels.length - 1;
-
-      const newConfig = {
-        ...currentConfig,
-        // Ensure droid uses BYOK by default (prevents falling back to Factory-hosted models).
-        model: 'custom-model',
-        // Avoid requiring a Factory web login just to start sessions.
-        cloudSessionSync: false,
-        // Best-effort: select the injected custom model as the default.
-        sessionDefaultSettings: {
-          ...(currentConfig.sessionDefaultSettings || {}),
-          model: this.toCustomModelId(openaiModel.displayName, modelIndex)
-        },
-        customModels
-      };
-
-      this.saveConfig(newConfig);
+        targetModel,
+        baseUrl,
+        options
+      );
       return;
     }
 
-    // Create Anthropic protocol configuration
+    // Handle dual-protocol providers
+    await this.loadDualProtocolProvider(
+      currentConfig,
+      existingModels,
+      plan,
+      apiKey,
+      targetModel,
+      options
+    );
+  }
+
+  private async loadOpenAIOnlyProvider(
+    currentConfig: any,
+    existingModels: any[],
+    plan: string,
+    apiKey: string,
+    targetModel: string,
+    baseUrl: string,
+    options?: ProviderOptions
+  ): Promise<void> {
+    const displayName = this.getDisplayName(plan, 'openai', options);
     const modelName = this.extractModelName(targetModel);
+    const maxOutputTokens = getMaxOutputTokens(plan, targetModel);
+    const maxContextSize = options?.maxContextSize ?? getMaxContextSize(plan);
+
+    const openaiModel: Record<string, any> = {
+      displayName,
+      name: modelName,
+      model: targetModel,
+      baseUrl,
+      apiKey,
+      provider: 'generic-chat-completion-api',
+      maxOutputTokens,
+      maxContextSize,
+    };
+
+    // Disable thinking for non-native sources
+    if (!supportsThinking(plan, options?.source)) {
+      openaiModel.thinking = false;
+      openaiModel.reasoning = false;
+    }
+
+    const customModels = [...existingModels, openaiModel];
+    const modelIndex = customModels.length - 1;
+
+    const newConfig = {
+      ...currentConfig,
+      model: 'custom-model',
+      cloudSessionSync: false,
+      sessionDefaultSettings: {
+        ...(currentConfig.sessionDefaultSettings || {}),
+        model: this.toCustomModelId(openaiModel.displayName, modelIndex),
+      },
+      customModels,
+    };
+
+    this.saveConfig(newConfig);
+  }
+
+  private async loadDualProtocolProvider(
+    currentConfig: any,
+    existingModels: any[],
+    plan: string,
+    apiKey: string,
+    targetModel: string,
+    options?: ProviderOptions
+  ): Promise<void> {
+    const maxOutputTokens = getMaxOutputTokens(plan, targetModel);
+    const modelName = this.extractModelName(targetModel);
+
+    // Create Anthropic protocol configuration
     const anthropicModel = {
       displayName: this.getDisplayName(plan, 'anthropic', options),
       name: modelName,
@@ -163,7 +422,7 @@ export class FactoryDroidManager {
       baseUrl: this.getBaseUrl(plan, 'anthropic', options),
       apiKey,
       provider: 'anthropic',
-      maxOutputTokens: 131072
+      maxOutputTokens,
     };
 
     // Create OpenAI Chat Completion protocol configuration
@@ -174,7 +433,7 @@ export class FactoryDroidManager {
       baseUrl: this.getBaseUrl(plan, 'openai', options),
       apiKey,
       provider: 'generic-chat-completion-api',
-      maxOutputTokens: 131072
+      maxOutputTokens,
     };
 
     const customModels = [...existingModels, anthropicModel, openaiModel];
@@ -186,204 +445,198 @@ export class FactoryDroidManager {
       cloudSessionSync: false,
       sessionDefaultSettings: {
         ...(currentConfig.sessionDefaultSettings || {}),
-        model: this.toCustomModelId(openaiModel.displayName, openaiModelIndex)
+        model: this.toCustomModelId(openaiModel.displayName, openaiModelIndex),
       },
-      customModels
+      customModels,
     };
 
     this.saveConfig(newConfig);
   }
 
+  // --------------------------------------------------------------------------
+  // Config Unloading
+  // --------------------------------------------------------------------------
+
   async unloadConfig(): Promise<void> {
     const currentConfig = this.getConfig();
-    // Filter out GLM/Kimi Coding Plan configurations
+
     if (currentConfig.customModels) {
-      currentConfig.customModels = currentConfig.customModels.filter((m: any) => !m.displayName.includes('GLM Coding Plan') && !m.displayName.includes('Kimi'));
-      // If customModels is empty, delete field
+      const displayNameFilters = Object.values(PROVIDER_METADATA).map((p) => p.displayName);
+      currentConfig.customModels = currentConfig.customModels.filter((m: any) =>
+        displayNameFilters.every((filter) => !m.displayName?.includes(filter))
+      );
+
       if (currentConfig.customModels.length === 0) {
         delete currentConfig.customModels;
       }
     }
+
     this.saveConfig(currentConfig);
   }
 
-  async detectCurrentConfig(): Promise<{ plan: string | null; apiKey: string | null; model?: string }> {
+  // --------------------------------------------------------------------------
+  // Config Detection
+  // --------------------------------------------------------------------------
+
+  async detectCurrentConfig(): Promise<{
+    plan: string | null;
+    apiKey: string | null;
+    model?: string;
+  }> {
     try {
       const config = this.getConfig();
-      if (!config.customModels || config.customModels.length === 0) {
+
+      if (!config.customModels?.length) {
         return { plan: null, apiKey: null };
       }
 
-      // Find GLM/Kimi/OpenRouter/NVIDIA Coding Plan configuration
-      const glmModel = config.customModels.find((m: any) => 
-        m.displayName.includes('GLM Coding Plan') 
-        || m.displayName.includes('Kimi')
-        || m.displayName.includes('OpenRouter')
-        || m.displayName.includes('NVIDIA')
+      // Find managed configurations by display name patterns
+      const displayNameFilters = Object.values(PROVIDER_METADATA).map((p) => p.displayName);
+      const managedModel = config.customModels.find((m: any) =>
+        displayNameFilters.some((filter) => m.displayName?.includes(filter))
       );
-      if (!glmModel) {
+
+      if (!managedModel) {
         return { plan: null, apiKey: null };
       }
 
-      const apiKey = glmModel.apiKey || null;
-      const baseUrl = glmModel.baseUrl;
-      const model = glmModel.model || undefined;
-      let plan: string | null = null;
+      const plan = detectPlanFromBaseUrl(managedModel.baseUrl);
 
-      if (baseUrl === 'https://api.z.ai/api/coding/paas/v4' || baseUrl === 'https://api.z.ai/api/anthropic') {
-        plan = 'glm_coding_plan_global';
-      } else if (baseUrl === 'https://open.bigmodel.cn/api/coding/paas/v4' || baseUrl === 'https://open.bigmodel.cn/api/anthropic') {
-        plan = 'glm_coding_plan_china';
-      } else if (baseUrl?.includes('openrouter.ai')) {
-        plan = 'openrouter';
-      } else if (baseUrl?.includes('nvidia.com')) {
-        plan = 'nvidia';
-      } else if (baseUrl) {
-        plan = 'kimi';
-      }
-
-      return { plan, apiKey, model };
+      return {
+        plan,
+        apiKey: managedModel.apiKey ?? null,
+        model: managedModel.model,
+      };
     } catch {
       return { plan: null, apiKey: null };
     }
   }
 
+  // --------------------------------------------------------------------------
+  // MCP Management
+  // --------------------------------------------------------------------------
+
   isMCPInstalled(mcpId: string): boolean {
     try {
       const config = this.getMCPConfig();
-      if (!config.mcpServers) {
-        return false;
-      }
-      return mcpId in config.mcpServers;
+      return mcpId in (config.mcpServers ?? {});
     } catch {
       return false;
     }
   }
 
   async installMCP(mcp: MCPService, apiKey: string, plan: string): Promise<void> {
-    try {
-      const config = this.getMCPConfig();
-      if (!config.mcpServers) {
-        config.mcpServers = {};
-      }
+    const config = this.getMCPConfig();
+    config.mcpServers ??= {};
 
-      let mcpConfig: any;
+    let mcpConfig: any;
 
-      if (mcp.protocol === 'stdio') {
-        // Determine environment variables
-        let env: Record<string, string> = {};
-        if (mcp.envTemplate && plan) {
-          env = { ...(mcp.envTemplate[plan] || {}) };
-        } else if (mcp.env) {
-          env = { ...mcp.env };
-        }
-
-        for (const [key, value] of Object.entries(env)) {
-          if (value !== '' || !process.env[key]) continue;
-          env[key] = process.env[key] as string;
-        }
-
-        // Add API key if required
-        if (mcp.requiresAuth && apiKey) {
-          env[mcp.authEnvVar || 'Z_AI_API_KEY'] = apiKey;
-        }
-
-        mcpConfig = {
-          type: 'stdio',
-          command: mcp.command || 'npx',
-          args: mcp.command === 'npx' && !mcp.args?.includes('--silent')
-            ? ['--silent', ...(mcp.args || [])]
-            : (mcp.args || []),
-          env,
-          disabled: false
-        };
-      } else if (mcp.protocol === 'sse' || mcp.protocol === 'streamable-http') {
-        // Determine URL based on plan
-        let url = '';
-        if (mcp.urlTemplate && plan) {
-          url = mcp.urlTemplate[plan];
-        } else if (mcp.url) {
-          url = mcp.url;
-        } else {
-          throw new Error(`MCP ${mcp.id} missing url or urlTemplate`);
-        }
-
-        // Factory Droid uses http type
-        mcpConfig = {
-          type: 'http',
-          url: url,
-          headers: {
-            ...(mcp.headers || {})
-          },
-          disabled: false
-        };
-
-        // Add API key to headers if required
-        if (mcp.requiresAuth && apiKey) {
-          const headerName = mcp.authHeader || 'Authorization';
-          const authScheme = mcp.authScheme || 'Bearer';
-          mcpConfig.headers = {
-            ...mcpConfig.headers,
-            [headerName]: authScheme === 'Bearer' ? `Bearer ${apiKey}` : apiKey
-          };
-        }
-      } else {
-        throw new Error(`Unsupported protocol: ${mcp.protocol}`);
-      }
-
-      config.mcpServers[mcp.id] = mcpConfig;
-      this.saveMCPConfig(config);
-    } catch (error) {
-      throw new Error(`Failed to install MCP ${mcp.name}: ${error}`);
+    if (mcp.protocol === 'stdio') {
+      mcpConfig = this.buildStdioMCPConfig(mcp, apiKey, plan);
+    } else if (mcp.protocol === 'sse' || mcp.protocol === 'streamable-http') {
+      mcpConfig = this.buildHttpMCPConfig(mcp, apiKey, plan);
+    } else {
+      throw new Error(`Unsupported protocol: ${mcp.protocol}`);
     }
+
+    config.mcpServers[mcp.id] = mcpConfig;
+    this.saveMCPConfig(config);
+  }
+
+  private buildStdioMCPConfig(
+    mcp: MCPService,
+    apiKey: string,
+    plan: string
+  ): Record<string, any> {
+    // Build environment variables
+    const env = this.buildMCPConfigEnv(mcp, plan);
+
+    // Add API key if required
+    if (mcp.requiresAuth && apiKey) {
+      env[mcp.authEnvVar || 'Z_AI_API_KEY'] = apiKey;
+    }
+
+    return {
+      type: 'stdio',
+      command: mcp.command || 'npx',
+      args:
+        mcp.command === 'npx' && !mcp.args?.includes('--silent')
+          ? ['--silent', ...(mcp.args || [])]
+          : mcp.args || [],
+      env,
+      disabled: false,
+    };
+  }
+
+  private buildMCPConfigEnv(mcp: MCPService, plan: string): Record<string, string> {
+    let env: Record<string, string> = {};
+
+    if (mcp.envTemplate && plan) {
+      env = { ...(mcp.envTemplate[plan] || {}) };
+    } else if (mcp.env) {
+      env = { ...mcp.env };
+    }
+
+    // Fill in environment variables from process.env if needed
+    for (const [key, value] of Object.entries(env)) {
+      if (value === '' && process.env[key]) {
+        env[key] = process.env[key] as string;
+      }
+    }
+
+    return env;
+  }
+
+  private buildHttpMCPConfig(mcp: MCPService, apiKey: string, plan: string): Record<string, any> {
+    const url = mcp.urlTemplate?.[plan] ?? mcp.url;
+    if (!url) {
+      throw new Error(`MCP ${mcp.id} missing url or urlTemplate`);
+    }
+
+    const headers: Record<string, string> = { ...(mcp.headers || {}) };
+
+    // Add API key to headers if required
+    if (mcp.requiresAuth && apiKey) {
+      const headerName = mcp.authHeader || 'Authorization';
+      const authScheme = mcp.authScheme || 'Bearer';
+      headers[headerName] = authScheme === 'Bearer' ? `Bearer ${apiKey}` : apiKey;
+    }
+
+    return {
+      type: 'http',
+      url,
+      headers,
+      disabled: false,
+    };
   }
 
   async uninstallMCP(mcpId: string): Promise<void> {
-    try {
-      const config = this.getMCPConfig();
-      if (!config.mcpServers) {
-        return;
-      }
-      delete config.mcpServers[mcpId];
-      this.saveMCPConfig(config);
-    } catch (error) {
-      throw new Error(`Failed to uninstall MCP ${mcpId}: ${error}`);
-    }
+    const config = this.getMCPConfig();
+    delete config.mcpServers?.[mcpId];
+    this.saveMCPConfig(config);
   }
 
   getInstalledMCPs(): string[] {
     try {
       const config = this.getMCPConfig();
-      if (!config.mcpServers) {
-        return [];
-      }
-      return Object.keys(config.mcpServers);
+      return Object.keys(config.mcpServers ?? {});
     } catch {
       return [];
     }
   }
 
   getMCPStatus(mcpServices: MCPService[]): Map<string, boolean> {
-    const status = new Map<string, boolean>();
-    for (const mcp of mcpServices) {
-      status.set(mcp.id, this.isMCPInstalled(mcp.id));
-    }
-    return status;
+    return new Map(mcpServices.map((mcp) => [mcp.id, this.isMCPInstalled(mcp.id)]));
   }
 
   getOtherMCPs(builtinIds: string[]): Array<{ id: string; config: any }> {
     try {
       const config = this.getMCPConfig();
-      if (!config.mcpServers) {
-        return [];
-      }
-      const otherMCPs: Array<{ id: string; config: any }> = [];
-      for (const [id, mcpConfig] of Object.entries(config.mcpServers)) {
-        if (!builtinIds.includes(id)) {
-          otherMCPs.push({ id, config: mcpConfig });
-        }
-      }
-      return otherMCPs;
+      const mcpServers = config.mcpServers ?? {};
+
+      return Object.entries(mcpServers)
+        .filter(([id]) => !builtinIds.includes(id))
+        .map(([id, mcpConfig]) => ({ id, config: mcpConfig }));
     } catch {
       return [];
     }
@@ -392,7 +645,7 @@ export class FactoryDroidManager {
   getAllMCPServers(): Record<string, any> {
     try {
       const config = this.getMCPConfig();
-      return config.mcpServers || {};
+      return config.mcpServers ?? {};
     } catch {
       return {};
     }

@@ -41,14 +41,16 @@ export class OpenCodeManager {
 
   private isCustomProvider(plan: string): boolean {
     // Custom providers (OpenAI-compatible) need full configuration with npm, name, options, models
-    // This includes NVIDIA, OpenRouter, LM Studio - any provider using @ai-sdk/openai-compatible
-    return plan === 'nvidia' || plan === 'openrouter' || plan === 'lmstudio';
+    // This includes NVIDIA, OpenRouter, Alibaba Coding, LM Studio - any provider using @ai-sdk/openai-compatible
+    return plan === 'nvidia' || plan === 'openrouter' || plan === 'alibaba' || plan === 'alibaba_api' || plan === 'lmstudio';
   }
 
   private getProviderDisplayName(plan: string): string {
     const names: Record<string, string> = {
       nvidia: 'NVIDIA NIM',
       openrouter: 'OpenRouter',
+      alibaba: 'Alibaba Coding',
+      alibaba_api: 'Alibaba API (Singapore)',
       lmstudio: 'LM Studio (local)',
       kimi: 'Moonshot AI'
     };
@@ -59,6 +61,8 @@ export class OpenCodeManager {
     const urls: Record<string, string> = {
       nvidia: 'https://integrate.api.nvidia.com/v1',
       openrouter: 'https://openrouter.ai/api/v1',
+      alibaba: 'https://coding-intl.dashscope.aliyuncs.com/v1',
+      alibaba_api: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
       lmstudio: 'http://localhost:1234/v1'
     };
     return urls[plan] || 'http://localhost:1234/v1';
@@ -68,6 +72,8 @@ export class OpenCodeManager {
     const models: Record<string, string> = {
       nvidia: 'moonshotai/kimi-k2.5',
       openrouter: 'kimi-k2.5',
+      alibaba: 'qwen3-coder-plus',
+      alibaba_api: 'qwen3-max-2026-01-23',
       lmstudio: 'lmstudio-community'
     };
     return models[plan] || 'default-model';
@@ -84,7 +90,7 @@ export class OpenCodeManager {
 
     // Keep other providers (if any), but remove old providers managed by this app
     // This ensures clean switching between providers
-    const managedProviders = ['zhipuai-coding-plan', 'zai-coding-plan', 'moonshot-ai-coding', 'kimi-custom', 'nvidia', 'openrouter', 'lmstudio'];
+    const managedProviders = ['zhipuai-coding-plan', 'zai-coding-plan', 'moonshot-ai-coding', 'kimi-custom', 'nvidia', 'openrouter', 'alibaba', 'alibaba_api', 'lmstudio'];
     if (oldProvider) {
       for (const [key, value] of Object.entries(oldProvider)) {
         if (!managedProviders.includes(key)) {
@@ -181,6 +187,10 @@ export class OpenCodeManager {
     let defaultModel: string;
     if (plan === 'kimi' || plan === 'openrouter' || plan === 'nvidia') {
       defaultModel = 'kimi-k2.5';
+    } else if (plan === 'alibaba') {
+      defaultModel = 'qwen3-coder-plus';
+    } else if (plan === 'alibaba_api') {
+      defaultModel = 'qwen3-max-2026-01-23';
     } else if (plan === 'lmstudio') {
       defaultModel = 'lmstudio-community';
     } else if (plan === 'glm_coding_plan_global') {
@@ -209,7 +219,7 @@ export class OpenCodeManager {
     const currentConfig = this.getConfig();
     // Remove provider's managed provider configurations
     if (currentConfig.provider) {
-      const managedProviders = ['zhipuai-coding-plan', 'zai-coding-plan', 'moonshot-ai-coding', 'nvidia', 'openrouter', 'lmstudio'];
+      const managedProviders = ['zhipuai-coding-plan', 'zai-coding-plan', 'moonshot-ai-coding', 'nvidia', 'openrouter', 'alibaba', 'alibaba_api', 'lmstudio'];
       for (const providerKey of managedProviders) {
         delete currentConfig.provider[providerKey];
       }
@@ -220,7 +230,7 @@ export class OpenCodeManager {
     }
 
     // Remove model and small_model (if they are managed providers)
-    const managedProviderIds = ['coding-plan', 'moonshot-ai-coding', 'kimi-custom', 'nvidia', 'openrouter', 'lmstudio'];
+    const managedProviderIds = ['coding-plan', 'moonshot-ai-coding', 'kimi-custom', 'nvidia', 'openrouter', 'alibaba', 'alibaba_api', 'lmstudio'];
     const isManagedModel = (m: string) => managedProviderIds.some(id => m.includes(id));
     if (currentConfig.model && isManagedModel(currentConfig.model)) {
       delete currentConfig.model;
@@ -296,6 +306,29 @@ export class OpenCodeManager {
         apiKey = config.provider['lmstudio'].options?.apiKey || null;
         // Extract model from the models field if available
         const models = config.provider['lmstudio'].models;
+        if (models && typeof models === 'object') {
+          const modelIds = Object.keys(models);
+          if (modelIds.length > 0) {
+            model = modelIds[0];
+          }
+        }
+      } else if (config.provider['alibaba']) {
+        // Alibaba coding plan custom provider
+        const baseUrl = config.provider['alibaba'].options?.baseURL || '';
+        plan = typeof baseUrl === 'string' && baseUrl.includes('compatible-mode') ? 'alibaba_api' : 'alibaba';
+        apiKey = config.provider['alibaba'].options?.apiKey || null;
+        const models = config.provider['alibaba'].models;
+        if (models && typeof models === 'object') {
+          const modelIds = Object.keys(models);
+          if (modelIds.length > 0) {
+            model = modelIds[0];
+          }
+        }
+      } else if (config.provider['alibaba_api']) {
+        // Alibaba API custom provider
+        plan = 'alibaba_api';
+        apiKey = config.provider['alibaba_api'].options?.apiKey || null;
+        const models = config.provider['alibaba_api'].models;
         if (models && typeof models === 'object') {
           const modelIds = Object.keys(models);
           if (modelIds.length > 0) {

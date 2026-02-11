@@ -28,7 +28,7 @@ import { getDefaultAnthropicModel, resolveAnthropicBaseUrl } from '../utils/prov
  * - GLM Coding Plan (Global): https://api.z.ai/api/anthropic → calls /api/anthropic/v1/messages
  * - GLM Coding Plan (China): https://open.bigmodel.cn/api/anthropic → calls /api/anthropic/v1/messages
  * - OpenRouter: https://openrouter.ai/api → calls /api/v1/messages (OpenRouter supports Anthropic format)
- * - Alibaba Cloud (DashScope): https://dashscope-intl.aliyuncs.com/apps/anthropic → calls /apps/anthropic/v1/messages
+ * - Alibaba Coding Plan: https://coding-intl.dashscope.aliyuncs.com/apps/anthropic → calls /apps/anthropic/v1/messages
  * - LM Studio: http://localhost:1234 → calls /v1/messages (LM Studio 0.4.1+ supports Anthropic format)
  * 
  * NOT supported (OpenAI-compatible only, no /v1/messages endpoint):
@@ -138,15 +138,22 @@ export class ClaudeCodeManager {
         'Use a different tool (like OpenCode, Crush, or Pi) for NVIDIA NIM, or use GLM Coding Plan with Claude Code.'
       );
     } else if (plan === 'alibaba') {
-      // Alibaba Cloud DashScope - Claude-specific Anthropic-compatible endpoint
-      // See: https://www.alibabacloud.com/help/en/model-studio/claude-code
+      // Alibaba Coding Plan - Anthropic-compatible endpoint for Claude Code
       // Claude Code appends /v1/messages, so: /apps/anthropic + /v1/messages = /apps/anthropic/v1/messages
-      baseUrl = requestedAnthropicBaseUrl || 'https://dashscope-intl.aliyuncs.com/apps/anthropic';
-      // Qwen models for Claude Code
+      baseUrl = requestedAnthropicBaseUrl || 'https://coding-intl.dashscope.aliyuncs.com/apps/anthropic';
+      // Coding Plan currently supports qwen3-coder-plus.
       defaultModels = {
         opus: 'qwen3-coder-plus',
         sonnet: 'qwen3-coder-plus',
-        haiku: 'qwen3-coder-flash'
+        haiku: 'qwen3-coder-plus'
+      };
+    } else if (plan === 'alibaba_api') {
+      // Alibaba Model Studio API (Singapore) can also expose Anthropic-compatible endpoint.
+      baseUrl = requestedAnthropicBaseUrl || 'https://dashscope-intl.aliyuncs.com/apps/anthropic';
+      defaultModels = {
+        opus: 'qwen3-coder-plus',
+        sonnet: 'qwen3-coder-plus',
+        haiku: 'qwen3-coder-plus'
       };
     } else if (plan === 'glm_coding_plan_global') {
       // GLM Coding Plan Global - use Anthropic-compatible endpoint (NOT the OpenAI endpoint from profile)
@@ -293,9 +300,15 @@ export class ClaudeCodeManager {
       } else if (baseUrl?.includes('localhost:1234') || baseUrl?.includes('127.0.0.1:1234')) {
         // LM Studio local server (default port 1234)
         plan = 'lmstudio';
-      } else if (baseUrl?.includes('dashscope') || baseUrl?.includes('aliyuncs.com/apps/anthropic')) {
-        // Alibaba Cloud DashScope Claude-specific endpoint
+      } else if (baseUrl?.includes('coding-intl.dashscope.aliyuncs.com')) {
+        // Alibaba Coding Plan endpoint
         plan = 'alibaba';
+      } else if (baseUrl?.includes('dashscope-intl.aliyuncs.com/apps/anthropic') || baseUrl?.includes('dashscope.aliyuncs.com/apps/anthropic')) {
+        // Anthropic-compatible endpoint can be used by either Coding Plan or API profile.
+        plan = typeof apiKey === 'string' && apiKey.startsWith('sk-sp-') ? 'alibaba' : 'alibaba_api';
+      } else if (baseUrl?.includes('compatible-mode') || baseUrl?.includes('dashscope')) {
+        // Alibaba API / other DashScope endpoint
+        plan = 'alibaba_api';
       } else if (baseUrl?.includes('nvidia.com')) {
         // NVIDIA - should not work but detect anyway
         plan = 'nvidia';

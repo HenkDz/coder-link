@@ -4,8 +4,9 @@ import chalk from 'chalk';
 import { configManager, isKimiLikePlan } from '../utils/config.js';
 import type { Plan } from '../utils/config.js';
 import { toolManager } from '../lib/tool-manager.js';
+import type { ToolName } from '../lib/tool-manager.js';
 import { logger } from '../utils/logger.js';
-import { PROVIDER_CHOICES, providerProtocolSummary } from '../utils/providers.js';
+import { PROVIDER_CHOICES, providerProtocolSummary, supportsOpenAIProtocol } from '../utils/providers.js';
 import { commandExists, runInteractive, runInteractiveWithEnv, runInNewTerminal } from '../utils/exec.js';
 import { printHeader, printStatusBar, printNavigationHints, printConfigPathHint, planLabel, maskApiKey, toolLabel, statusIndicator } from '../utils/brand.js';
 import { printError, printSuccess, printWarning, printInfo } from '../utils/output.js';
@@ -14,13 +15,17 @@ import { providerSetupFlow } from './provider-menu.js';
 import { mcpMenu } from './mcp-menu.js';
 
 async function chooseToolProviderPlan(tool: string): Promise<Plan | '__back'> {
+  const enabled = new Set(configManager.getEnabledProviders());
+  const visibleProviders = PROVIDER_CHOICES.filter((c) => enabled.has(c.value));
+  const providerChoices = visibleProviders.length ? visibleProviders : PROVIDER_CHOICES;
+
   const { selectedPlan } = await inquirer.prompt<{ selectedPlan: Plan | '__back' }>([
     {
       type: 'list',
       name: 'selectedPlan',
       message: `Select provider for ${toolLabel(tool)}:`,
       choices: [
-        ...PROVIDER_CHOICES.map((c) => {
+        ...providerChoices.map((c) => {
           const key = configManager.getApiKeyFor(c.value);
           const status = key ? chalk.green(' ●') : chalk.gray(' (not configured)');
           const incompat = getProviderIncompatibility(tool, c.value);
@@ -473,6 +478,50 @@ async function launchTool(tool: string, mode?: 'same' | 'new'): Promise<void> {
     launchMode = selectedMode;
   }
 
+  if (tool === 'codex') {
+    const plan = (toolPlan as Plan | null) || (globalPlan as Plan | undefined);
+    if (!plan) {
+      printWarning('Codex launch requires a configured provider first.');
+      printInfo('Use "Set Provider for This Tool" or choose a default provider.');
+      await pause();
+      return;
+    }
+    if (!supportsOpenAIProtocol(plan)) {
+      printWarning(`${planLabel(plan)} is not OpenAI-compatible, so it cannot be used with Codex.`);
+      await pause();
+      return;
+    }
+
+    let apiKey = (toolKey && toolKey.trim()) || configManager.getApiKeyFor(plan) || process.env.OPENAI_API_KEY?.trim() || '';
+    if (!apiKey) {
+      apiKey = (await ensureProviderApiKey(plan)) || '';
+    }
+    if (!apiKey && plan === 'lmstudio') {
+      apiKey = 'lmstudio';
+    }
+    if (!apiKey) {
+      printWarning(`No API key configured for ${planLabel(plan)}.`);
+      await pause();
+      return;
+    }
+
+    const codexEnv: Record<string, string> = {
+      OPENAI_API_KEY: apiKey,
+    }
+
+    if (launchMode === 'new') {
+      const ok = runInNewTerminal(start.cmd, start.args, codexEnv);
+      if (!ok) {
+        printWarning('Failed to open a new terminal window. Launching here instead.');
+        await runInteractiveWithEnv(start.cmd, start.args, codexEnv);
+      }
+      return;
+    }
+
+    await runInteractiveWithEnv(start.cmd, start.args, codexEnv);
+    return;
+  }
+
   if (tool === 'factory-droid') {
     let factoryKey = configManager.getFactoryApiKey() || process.env.FACTORY_API_KEY;
     if (!factoryKey) {
@@ -518,6 +567,34 @@ async function launchTool(tool: string, mode?: 'same' | 'new'): Promise<void> {
   await runInteractive(start.cmd, start.args);
 }
 
+async function manageToolAvailability(): Promise<void> {
+  const allTools = toolManager.getSupportedTools();
+  const enabled = new Set(configManager.getEnabledTools());
+
+  const { selected } = await inquirer.prompt<{ selected: ToolName[] }>([
+    {
+      type: 'checkbox',
+      name: 'selected',
+      message: 'Choose which tools are visible in menus:',
+      choices: allTools.map((tool) => ({
+        name: toolLabel(tool),
+        value: tool,
+        checked: enabled.has(tool),
+      })),
+      validate: (values: ToolName[]) => values.length > 0 || 'Select at least one tool',
+    },
+  ]);
+
+  configManager.setEnabledTools(selected);
+  const lastUsed = configManager.getLastUsedTool();
+  if (lastUsed && !selected.includes(lastUsed as ToolName)) {
+    configManager.setLastUsedTool(selected[0]);
+  }
+
+  printSuccess(`Visible tools updated (${selected.length}/${allTools.length}).`);
+  await pause();
+}
+
 export async function toolSelectMenu(): Promise<void> {
   while (true) {
     console.clear();
@@ -527,10 +604,13 @@ export async function toolSelectMenu(): Promise<void> {
     printConfigPathHint(configManager.configPath);
     printNavigationHints();
 
-    const tools = toolManager.getSupportedTools();
+    const allTools = toolManager.getSupportedTools();
+    const enabledTools = new Set(configManager.getEnabledTools());
+    const tools = allTools.filter((t) => enabledTools.has(t));
+    const visibleTools = tools.length ? tools : allTools;
 
     const toolStates = await Promise.all(
-      tools.map(async (t) => {
+      visibleTools.map(async (t) => {
         const capabilities = toolManager.getCapabilities(t);
         try {
           const d = capabilities.supportsProviderConfig
@@ -552,6 +632,8 @@ export async function toolSelectMenu(): Promise<void> {
         name: 'tool',
         message: 'Select tool:',
         choices: [
+          { name: '⚙ Manage Visible Tools', value: '__manage_tools' },
+          new inquirer.Separator(),
           ...toolStates.map((s) => {
             const status = s.capabilities.supportsProviderConfig ? statusIndicator(s.configured) : chalk.gray('○');
             const installHintText = s.installed ? '' : chalk.yellow(' (not detected)');
@@ -568,6 +650,10 @@ export async function toolSelectMenu(): Promise<void> {
     ]);
 
     if (tool === '__back') return;
+    if (tool === '__manage_tools') {
+      await manageToolAvailability();
+      continue;
+    }
     await toolMenu(tool);
   }
 }

@@ -27,7 +27,8 @@ export const BUILTIN_MCP_SERVICES: MCPService[] = [
       openrouter: { GITHUB_TOKEN: '' },
       nvidia: { GITHUB_TOKEN: '' },
       lmstudio: { GITHUB_TOKEN: '' },
-      alibaba: { GITHUB_TOKEN: '' }
+      alibaba: { GITHUB_TOKEN: '' },
+      alibaba_api: { GITHUB_TOKEN: '' }
     }
   },
   // Z AI MCP Servers (GLM API)

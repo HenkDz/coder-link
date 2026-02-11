@@ -24,7 +24,13 @@ const jsonOption = new Option('-j, --json', 'Output as JSON for programmatic use
 const formatOption = new Option('-f, --format <format>', 'Output format').choices(['pretty', 'json']).default('pretty');
 
 function getMcpCapableTools(): ToolName[] {
-  return toolManager.getSupportedTools().filter((tool) => toolManager.getCapabilities(tool).supportsMcp);
+  return getVisibleTools().filter((tool) => toolManager.getCapabilities(tool).supportsMcp);
+}
+
+function getVisibleTools(): ToolName[] {
+  const enabled = new Set(configManager.getEnabledTools());
+  const visible = toolManager.getSupportedTools().filter((tool) => enabled.has(tool));
+  return visible.length ? visible : toolManager.getSupportedTools();
 }
 
 function resolveMcpTool(explicitTool?: string): ToolName {
@@ -80,7 +86,7 @@ program
 _coder_link_completion() {
   local cur="\${COMP_WORDS[COMP_CWORD]}"
   local commands="init auth lang tools mcp doctor status completion"
-  local tools="claude-code opencode crush factory-droid kimi amp pi"
+  local tools="claude-code opencode crush factory-droid kimi amp pi codex"
   local providers="${providerValues}"
   local services="filesystem github"
   
@@ -126,7 +132,7 @@ _coder_link() {
   typeset -A opt_args
   
   local commands=(init auth lang tools mcp doctor status completion)
-  local tools=(claude-code opencode crush factory-droid kimi amp pi)
+  local tools=(claude-code opencode crush factory-droid kimi amp pi codex)
   local providers=(${PROVIDER_PLAN_VALUES.join(' ')})
   local services=(filesystem github)
   
@@ -184,7 +190,7 @@ complete -c coder-link -n "__fish_seen_subcommand_from auth" -a "revoke"
     param($wordToComplete, $commandAst, $cursorPosition)
     
     $commands = @('init', 'auth', 'lang', 'tools', 'mcp', 'doctor', 'status', 'completion')
-    $tools = @('claude-code', 'opencode', 'crush', 'factory-droid', 'kimi', 'amp', 'pi')
+    $tools = @('claude-code', 'opencode', 'crush', 'factory-droid', 'kimi', 'amp', 'pi', 'codex')
     $providers = @(${providerValuesQuoted})
     $services = @('filesystem', 'github')
     
@@ -395,7 +401,7 @@ program
     })
   )
   .addCommand(new Command('alibaba [token]')
-    .description('Set Alibaba Cloud (DashScope) API key')
+    .description('Set Alibaba Coding Plan API key (monthly plan)')
     .action(async (token?: string) => {
       try {
         if (!token) {
@@ -408,6 +414,32 @@ program
           token = apiKey;
         }
         configManager.setAuth('alibaba', token.trim());
+        console.log(i18n.t('auth.set_success'));
+      } catch (error) {
+        logger.logError('auth.set', error);
+        printError(
+          error instanceof Error ? error.message : String(error),
+          'Run "coder-link auth" for interactive setup'
+        );
+        process.exit(1);
+      }
+    })
+  )
+  .addCommand(new Command('alibaba_api [token]')
+    .description('Set Alibaba Model Studio API key (Singapore endpoint)')
+    .alias('alibaba-api')
+    .action(async (token?: string) => {
+      try {
+        if (!token) {
+          const { apiKey } = await inquirer.prompt<{ apiKey: string }>([{
+            type: 'password',
+            name: 'apiKey',
+            message: i18n.t('wizard.enter_api_key'),
+            validate: (input: string) => input.trim().length > 0 || 'API key cannot be empty'
+          }]);
+          token = apiKey;
+        }
+        configManager.setAuth('alibaba_api', token.trim());
         console.log(i18n.t('auth.set_success'));
       } catch (error) {
         logger.logError('auth.set', error);
@@ -502,7 +534,7 @@ program
   .addCommand(new Command('list')
     .description('List all supported tools')
     .action(async () => {
-      const tools = toolManager.getSupportedTools();
+      const tools = getVisibleTools();
       const toolData = [];
       
       for (const tool of tools) {
@@ -667,7 +699,7 @@ program
   .action(async (options) => {
     try {
       const { plan, apiKey } = configManager.getAuth();
-      const tools = toolManager.getSupportedTools();
+      const tools = getVisibleTools();
       const toolStatuses = [];
       
       for (const tool of tools) {
@@ -744,7 +776,7 @@ program
       const hasProvider = !!(plan && apiKey);
       
       // Tool status summary
-      const tools = toolManager.getSupportedTools();
+      const tools = getVisibleTools();
       let configured = 0;
       let total = 0;
       const toolDetails: Array<{ tool: string; label: string; configured: boolean; supportsProviderConfig: boolean }> = [];

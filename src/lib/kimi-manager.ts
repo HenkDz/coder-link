@@ -16,7 +16,9 @@ const PROVIDER_BASE_URLS: Record<string, string> = {
   'https://api.moonshot.ai/v1': 'kimi',
   'https://openrouter.ai/api/v1': 'openrouter',
   'https://integrate.api.nvidia.com/v1': 'nvidia',
-  'https://dashscope-intl.aliyuncs.com/compatible-mode/v1': 'alibaba',
+  'https://coding-intl.dashscope.aliyuncs.com/v1': 'alibaba',
+  'https://dashscope-intl.aliyuncs.com/compatible-mode/v1': 'alibaba_api',
+  'https://dashscope.aliyuncs.com/compatible-mode/v1': 'alibaba_api',
 };
 
 type AnyRecord = Record<string, any>;

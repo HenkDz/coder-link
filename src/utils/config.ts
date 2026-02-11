@@ -8,9 +8,55 @@ export const CONFIG_FILE = join(CONFIG_DIR, 'config.yaml');
 export const LEGACY_CONFIG_DIR = join(homedir(), '.chelper');
 export const LEGACY_CONFIG_FILE = join(LEGACY_CONFIG_DIR, 'config.yaml');
 
-export type Plan = 'glm_coding_plan_global' | 'glm_coding_plan_china' | 'kimi' | 'openrouter' | 'nvidia' | 'lmstudio' | 'alibaba';
+export type Plan =
+  | 'glm_coding_plan_global'
+  | 'glm_coding_plan_china'
+  | 'kimi'
+  | 'openrouter'
+  | 'nvidia'
+  | 'lmstudio'
+  | 'alibaba'
+  | 'alibaba_api';
+export type ToolId =
+  | 'claude-code'
+  | 'opencode'
+  | 'crush'
+  | 'factory-droid'
+  | 'kimi'
+  | 'amp'
+  | 'pi'
+  | 'codex';
 
-export const KIMI_LIKE_PLANS: ReadonlySet<string> = new Set(['kimi', 'openrouter', 'nvidia', 'lmstudio', 'alibaba']);
+export const ALL_PROVIDER_PLANS: Plan[] = [
+  'glm_coding_plan_global',
+  'glm_coding_plan_china',
+  'kimi',
+  'openrouter',
+  'nvidia',
+  'lmstudio',
+  'alibaba',
+  'alibaba_api',
+];
+
+export const ALL_TOOL_IDS: ToolId[] = [
+  'claude-code',
+  'opencode',
+  'crush',
+  'factory-droid',
+  'kimi',
+  'amp',
+  'pi',
+  'codex',
+];
+
+export const KIMI_LIKE_PLANS: ReadonlySet<string> = new Set([
+  'kimi',
+  'openrouter',
+  'nvidia',
+  'lmstudio',
+  'alibaba',
+  'alibaba_api',
+]);
 
 export type OpenAICompatiblePlan = Exclude<Plan, 'glm_coding_plan_global' | 'glm_coding_plan_china'>;
 
@@ -42,6 +88,11 @@ export interface Config {
     };
   };
 
+  features?: {
+    enabled_providers?: Plan[];
+    enabled_tools?: ToolId[];
+  };
+
   // Provider profiles
   providers?: {
     glm?: {
@@ -53,6 +104,7 @@ export interface Config {
     nvidia?: ProviderConfig;
     lmstudio?: ProviderConfig;
     alibaba?: ProviderConfig;
+    alibaba_api?: ProviderConfig;
   };
 }
 
@@ -96,6 +148,7 @@ export class ConfigManager {
     this.migrateLegacyAuth();
     this.migrateLegacyKimiModelIds();
     this.migrateLegacyFactoryDroidApiKey();
+    this.migrateAlibabaProfiles();
 
     // If we loaded from legacy path, write through to the new location (best-effort).
     if (loadedFromLegacy) {
@@ -118,6 +171,69 @@ export class ConfigManager {
       const content = yaml.dump(this.config, { lineWidth: 120, noRefs: true });
       writeFileSync(CONFIG_FILE, content, 'utf-8');
       this.configFilePath = CONFIG_FILE;
+    } catch {
+      // best-effort only
+    }
+  }
+
+  private migrateAlibabaProfiles(): void {
+    try {
+      if (!this.config.providers || typeof this.config.providers !== 'object') return;
+
+      const coding = this.config.providers.alibaba;
+      if (!coding || typeof coding !== 'object') return;
+
+      const key = typeof coding.api_key === 'string' ? coding.api_key.trim() : '';
+      const openAiBase = typeof coding.base_url === 'string' ? coding.base_url.trim() : '';
+      const lowerBase = openAiBase.toLowerCase();
+      const isCodingPlanKey = key.startsWith('sk-sp-');
+      const isCodingPlanBase = lowerBase.includes('coding-intl.dashscope.aliyuncs.com');
+      const isApiCompatibleBase =
+        lowerBase.includes('dashscope-intl.aliyuncs.com/compatible-mode/v1') ||
+        lowerBase.includes('dashscope.aliyuncs.com/compatible-mode/v1');
+
+      let changed = false;
+
+      if (isCodingPlanKey || (!key && isCodingPlanBase)) {
+        const anthropicBase = typeof coding.anthropic_base_url === 'string' ? coding.anthropic_base_url.trim() : '';
+        if (!openAiBase || isApiCompatibleBase) {
+          coding.base_url = 'https://coding-intl.dashscope.aliyuncs.com/v1';
+          changed = true;
+        }
+        if (!anthropicBase || /dashscope-intl\.aliyuncs\.com\/apps\/anthropic$/i.test(anthropicBase)) {
+          coding.anthropic_base_url = 'https://coding-intl.dashscope.aliyuncs.com/apps/anthropic';
+          changed = true;
+        }
+        if (!coding.model) {
+          coding.model = 'qwen3-coder-plus';
+          changed = true;
+        }
+        if (!coding.anthropic_model) {
+          coding.anthropic_model = 'qwen3-coder-plus';
+          changed = true;
+        }
+      } else if (isApiCompatibleBase || !!key || isCodingPlanBase) {
+        const apiProvider = this.config.providers.alibaba_api && typeof this.config.providers.alibaba_api === 'object'
+          ? this.config.providers.alibaba_api
+          : {};
+
+        if (!apiProvider.api_key && key) apiProvider.api_key = key;
+        if (!apiProvider.base_url) apiProvider.base_url = openAiBase || 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1';
+        if (!apiProvider.model) {
+          const migratedModel = typeof coding.model === 'string' ? coding.model.trim() : '';
+          apiProvider.model = migratedModel && migratedModel !== 'qwen3-coder-plus'
+            ? migratedModel
+            : 'qwen3-max-2026-01-23';
+        }
+        this.config.providers.alibaba_api = apiProvider;
+        delete this.config.providers.alibaba;
+        if (this.config.plan === 'alibaba') {
+          this.config.plan = 'alibaba_api';
+        }
+        changed = true;
+      }
+
+      if (changed) this.save();
     } catch {
       // best-effort only
     }
@@ -345,6 +461,54 @@ export class ConfigManager {
     this.save();
   }
 
+  getEnabledProviders(): Plan[] {
+    const enabled = this.config.features?.enabled_providers;
+    if (!Array.isArray(enabled) || enabled.length === 0) return [...ALL_PROVIDER_PLANS];
+    const set = new Set(ALL_PROVIDER_PLANS);
+    const valid = enabled.filter((p): p is Plan => typeof p === 'string' && set.has(p as Plan));
+    return valid.length ? Array.from(new Set(valid)) : [...ALL_PROVIDER_PLANS];
+  }
+
+  setEnabledProviders(plans: Plan[]): void {
+    const set = new Set(ALL_PROVIDER_PLANS);
+    const valid = plans.filter((p): p is Plan => typeof p === 'string' && set.has(p as Plan));
+    if (valid.length === 0) {
+      throw new Error('At least one provider must stay enabled');
+    }
+
+    this.config.features = this.config.features && typeof this.config.features === 'object' ? this.config.features : {};
+    this.config.features.enabled_providers = Array.from(new Set(valid));
+    this.save();
+  }
+
+  isProviderEnabled(plan: Plan): boolean {
+    return this.getEnabledProviders().includes(plan);
+  }
+
+  getEnabledTools(): ToolId[] {
+    const enabled = this.config.features?.enabled_tools;
+    if (!Array.isArray(enabled) || enabled.length === 0) return [...ALL_TOOL_IDS];
+    const set = new Set(ALL_TOOL_IDS);
+    const valid = enabled.filter((t): t is ToolId => typeof t === 'string' && set.has(t as ToolId));
+    return valid.length ? Array.from(new Set(valid)) : [...ALL_TOOL_IDS];
+  }
+
+  setEnabledTools(tools: ToolId[]): void {
+    const set = new Set(ALL_TOOL_IDS);
+    const valid = tools.filter((t): t is ToolId => typeof t === 'string' && set.has(t as ToolId));
+    if (valid.length === 0) {
+      throw new Error('At least one tool must stay enabled');
+    }
+
+    this.config.features = this.config.features && typeof this.config.features === 'object' ? this.config.features : {};
+    this.config.features.enabled_tools = Array.from(new Set(valid));
+    this.save();
+  }
+
+  isToolEnabled(tool: ToolId): boolean {
+    return this.getEnabledTools().includes(tool);
+  }
+
   getLastUsedTool(): string | undefined {
     return this.config.last_used_tool;
   }
@@ -367,7 +531,7 @@ export class ConfigManager {
       return { plan, apiKey };
     }
 
-    // OpenAI-compatible providers (kimi/openrouter/nvidia/lmstudio/alibaba)
+    // OpenAI-compatible providers (kimi/openrouter/nvidia/lmstudio/alibaba/alibaba_api)
     const prov = (this.config.providers as any)?.[plan];
     return { plan, apiKey: prov?.api_key };
   }
@@ -428,11 +592,19 @@ export class ConfigManager {
       maxContextSize: 128000,
     },
     alibaba: {
-      baseUrl: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
-      anthropicBaseUrl: 'https://dashscope-intl.aliyuncs.com/apps/anthropic',
+      baseUrl: 'https://coding-intl.dashscope.aliyuncs.com/v1',
+      anthropicBaseUrl: 'https://coding-intl.dashscope.aliyuncs.com/apps/anthropic',
       model: 'qwen3-coder-plus',
       anthropicModel: 'qwen3-coder-plus',
       source: 'alibaba',
+      maxContextSize: 128000,
+    },
+    alibaba_api: {
+      baseUrl: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
+      anthropicBaseUrl: 'https://dashscope-intl.aliyuncs.com/apps/anthropic',
+      model: 'qwen3-max-2026-01-23',
+      anthropicModel: 'qwen3-coder-plus',
+      source: 'alibaba-api-sg',
       maxContextSize: 128000,
     },
     glm_coding_plan_global: {
@@ -559,6 +731,7 @@ export class ConfigManager {
     if (this.config.providers?.nvidia) delete this.config.providers.nvidia.api_key;
     if (this.config.providers?.lmstudio) delete this.config.providers.lmstudio.api_key;
     if (this.config.providers?.alibaba) delete this.config.providers.alibaba.api_key;
+    if (this.config.providers?.alibaba_api) delete this.config.providers.alibaba_api.api_key;
     this.save();
   }
 

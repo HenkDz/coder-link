@@ -33,6 +33,49 @@ function formatProviderChoiceName(plan: Plan, options: { includeCurrent?: boolea
   return `${provider.name}${protocolHint}${currentSuffix}`;
 }
 
+function getVisibleProviders(currentPlan?: Plan): Array<{ name: string; value: Plan }> {
+  const enabled = new Set(configManager.getEnabledProviders());
+  const visible = PROVIDER_CHOICES.filter((c) => enabled.has(c.value));
+
+  if (currentPlan && !visible.some((c) => c.value === currentPlan)) {
+    const currentChoice = PROVIDER_CHOICES.find((c) => c.value === currentPlan);
+    if (currentChoice) visible.unshift(currentChoice);
+  }
+
+  const fallback = visible.length ? visible : PROVIDER_CHOICES;
+  return fallback.map((c) => ({ name: c.name, value: c.value }));
+}
+
+async function manageProviderAvailability(): Promise<void> {
+  const enabled = new Set(configManager.getEnabledProviders());
+  const currentPlan = configManager.getAuth().plan as Plan | undefined;
+
+  const { selected } = await inquirer.prompt<{ selected: Plan[] }>([
+    {
+      type: 'checkbox',
+      name: 'selected',
+      message: 'Choose which providers are visible in menus:',
+      choices: PROVIDER_CHOICES.map((c) => ({
+        name: `${c.name} ${chalk.gray(`[${providerProtocolSummary(c.value)}]`)}`,
+        value: c.value,
+        checked: enabled.has(c.value),
+      })),
+      validate: (values: Plan[]) => values.length > 0 || 'Select at least one provider',
+    },
+  ]);
+
+  configManager.setEnabledProviders(selected);
+
+  if (currentPlan && !selected.includes(currentPlan)) {
+    const fallback = selected[0];
+    const fallbackKey = getPlanApiKey(fallback);
+    configManager.setAuth(fallback, fallbackKey || '');
+    printInfo(`Default provider switched to ${planLabel(fallback)} because the previous provider was hidden.`);
+  }
+
+  printSuccess(`Visible providers updated (${selected.length}/${PROVIDER_CHOICES.length}).`);
+}
+
 async function configureProfilesMenu(): Promise<void> {
   while (true) {
     console.clear();
@@ -45,7 +88,7 @@ async function configureProfilesMenu(): Promise<void> {
         name: 'plan',
         message: 'Choose provider profile:',
         choices: [
-          ...PROVIDER_CHOICES.map((c) => {
+          ...getVisibleProviders().map((c) => {
             const key = configManager.getApiKeyFor(c.value);
             const status = key ? chalk.green(' (Configured)') : chalk.gray(' (Not set)');
             return { name: `${formatProviderChoiceName(c.value, {})}${status}`, value: c.value };
@@ -66,6 +109,12 @@ async function configureProfilesMenu(): Promise<void> {
 export async function providerSetupFlow(plan: Plan): Promise<void> {
   printInfo(`Configuring ${planLabel(plan)} profile...`);
   printInfo(`Protocols: ${providerProtocolSummary(plan)}`);
+  if (plan === 'alibaba') {
+    printInfo('Alibaba Coding Plan uses plan-specific key (sk-sp-*) and coding-intl endpoints.');
+  } else if (plan === 'alibaba_api') {
+    printInfo('Alibaba API (Singapore) supports OpenAI + Anthropic protocols.');
+    printInfo('Defaults: /compatible-mode/v1 (OpenAI) and /apps/anthropic (Anthropic).');
+  }
   console.log(chalk.gray("  (Tip: choose Quick Setup for most users)"));
   console.log(chalk.gray("  (Enter 'b' at text prompts to go back)\n"));
 
@@ -232,6 +281,39 @@ export async function providerSetupFlow(plan: Plan): Promise<void> {
 
   if (apiKey.trim().toLowerCase() === 'b') return providerSetupFlow(plan);
   const finalKey = apiKey.trim() || (existingKey ?? (isLocalProvider ? 'lmstudio' : ''));
+
+  if (plan === 'alibaba' && finalKey.startsWith('sk-sp-')) {
+    openAiBaseUrl = 'https://coding-intl.dashscope.aliyuncs.com/v1';
+    openAiModel = 'qwen3-coder-plus';
+    anthropicBaseUrl = 'https://coding-intl.dashscope.aliyuncs.com/apps/anthropic';
+    anthropicModel = 'qwen3-coder-plus';
+    configManager.setProviderProfile(plan, {
+      base_url: openAiBaseUrl,
+      model: openAiModel,
+      max_context_size: maxContextSize,
+      anthropic_base_url: anthropicBaseUrl,
+      anthropic_model: anthropicModel,
+    });
+    printInfo('Detected Alibaba Coding Plan key (sk-sp-*). Applied Coding Plan endpoints automatically.');
+  }
+  if (plan === 'alibaba_api') {
+    if (finalKey.startsWith('sk-sp-')) {
+      printWarning(
+        'Detected a Coding Plan key (sk-sp-*) under Alibaba API profile.',
+        'Use "Alibaba Coding Plan (Monthly)" profile for best compatibility.'
+      );
+    }
+    if (!openAiBaseUrl || !openAiBaseUrl.includes('dashscope-intl.aliyuncs.com')) {
+      openAiBaseUrl = 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1';
+      configManager.setProviderProfile(plan, {
+        base_url: openAiBaseUrl,
+        model: openAiModel || 'qwen3-max-2026-01-23',
+        max_context_size: maxContextSize,
+      });
+      printInfo('Applied Alibaba API Singapore endpoint as default.');
+    }
+  }
+
   configManager.setApiKeyFor(plan, finalKey);
 
   printSuccess(`${planLabel(plan)} profile updated`);
@@ -262,6 +344,19 @@ async function testOpenAiProtocol(plan: Plan): Promise<void> {
   const model = settings.model || '';
   const timeoutMs = 12000;
   const isNvidia = plan === 'nvidia' || baseUrl.includes('integrate.api.nvidia.com');
+
+  if (plan === 'alibaba' && apiKey.startsWith('sk-sp-') && !baseUrl.includes('coding-intl.dashscope.aliyuncs.com')) {
+    printWarning(
+      'Alibaba Coding Plan key detected, but OpenAI endpoint is not Coding Plan endpoint.',
+      'Recommended: https://coding-intl.dashscope.aliyuncs.com/v1'
+    );
+  }
+  if (plan === 'alibaba_api' && !baseUrl.includes('dashscope-intl.aliyuncs.com/compatible-mode/v1')) {
+    printWarning(
+      'Alibaba API profile is usually configured with Singapore endpoint.',
+      'Recommended: https://dashscope-intl.aliyuncs.com/compatible-mode/v1'
+    );
+  }
 
   const spinner = createSafeSpinner(`Testing ${planLabel(plan)} (OpenAI-compatible)...`).start();
   const result = await (async () => {
@@ -314,6 +409,24 @@ async function testAnthropicProtocol(plan: Plan): Promise<void> {
   const baseUrl = settings.anthropicBaseUrl || resolveAnthropicBaseUrl(plan, settings.baseUrl);
   const model = settings.anthropicModel || settings.model || getDefaultAnthropicModel(plan) || '';
 
+  if (
+    plan === 'alibaba' &&
+    apiKey.startsWith('sk-sp-') &&
+    baseUrl &&
+    !baseUrl.includes('coding-intl.dashscope.aliyuncs.com')
+  ) {
+    printWarning(
+      'Alibaba Coding Plan key detected, but Anthropic endpoint is not Coding Plan endpoint.',
+      'Recommended: https://coding-intl.dashscope.aliyuncs.com/apps/anthropic'
+    );
+  }
+  if (plan === 'alibaba_api' && baseUrl && !baseUrl.includes('dashscope-intl.aliyuncs.com/apps/anthropic')) {
+    printWarning(
+      'Alibaba API profile is usually configured with Singapore Anthropic endpoint.',
+      'Recommended: https://dashscope-intl.aliyuncs.com/apps/anthropic'
+    );
+  }
+
   if (!baseUrl) {
     printWarning(`Could not determine Anthropic endpoint for ${planLabel(plan)}. Configure provider profile first.`);
     return;
@@ -348,7 +461,7 @@ async function testProviderApisFlow(defaultPlan?: Plan): Promise<void> {
       name: 'plan',
       message: 'Choose provider to test:',
       choices: [
-        ...PROVIDER_CHOICES.map((c) => {
+        ...getVisibleProviders(defaultPlan).map((c) => {
           const key = configManager.getApiKeyFor(c.value);
           const keyStatus = key ? chalk.green(' ● key set') : chalk.gray(' (key not set)');
           return {
@@ -410,12 +523,13 @@ export async function providerMenu(): Promise<void> {
       console.log();
     }
 
-    type Action = 'set_global' | 'configure' | 'test' | 'revoke';
+    type Action = 'set_global' | 'configure' | 'test' | 'availability' | 'revoke';
     const choices: Array<{ name: string; value: Action }> = [
       { name: '1) Choose Default Provider', value: 'set_global' },
       { name: '2) Configure Provider Profile (Quick/Advanced)', value: 'configure' },
       { name: '3) Test Provider APIs (OpenAI/Anthropic)', value: 'test' },
-      { name: '4) Revoke Saved API Keys', value: 'revoke' },
+      { name: '4) Manage Visible Providers', value: 'availability' },
+      { name: '5) Revoke Saved API Keys', value: 'revoke' },
     ];
 
     const { action } = await inquirer.prompt<{ action: Action | '__back' }>([
@@ -437,7 +551,7 @@ export async function providerMenu(): Promise<void> {
             name: 'newPlan',
             message: 'Choose default provider:',
             choices: [
-              ...PROVIDER_CHOICES.map((c) => ({
+              ...getVisibleProviders(plan).map((c) => ({
                 name: formatProviderChoiceName(c.value, { includeCurrent: true, currentPlan: plan }),
                 value: c.value,
               })),
@@ -456,6 +570,9 @@ export async function providerMenu(): Promise<void> {
         }
       } else if (action === 'configure') {
         await configureProfilesMenu();
+      } else if (action === 'availability') {
+        await manageProviderAvailability();
+        await pause();
       } else if (action === 'revoke') {
         const { confirm } = await inquirer.prompt<{ confirm: boolean }>([
           {

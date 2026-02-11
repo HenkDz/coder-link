@@ -37,9 +37,9 @@ export interface ProviderOptions {
   maxContextSize?: number;
 }
 
-export type ToolName = 'claude-code' | 'opencode' | 'crush' | 'factory-droid' | 'kimi' | 'amp' | 'pi';
+export type ToolName = 'claude-code' | 'opencode' | 'crush' | 'factory-droid' | 'kimi' | 'amp' | 'pi' | 'codex';
 
-const TOOL_NAMES: ToolName[] = ['claude-code', 'opencode', 'crush', 'factory-droid', 'kimi', 'amp', 'pi'];
+const TOOL_NAMES: ToolName[] = ['claude-code', 'opencode', 'crush', 'factory-droid', 'kimi', 'amp', 'pi', 'codex'];
 
 const ALL_PLANS: Plan[] = [
   'glm_coding_plan_global',
@@ -49,6 +49,7 @@ const ALL_PLANS: Plan[] = [
   'nvidia',
   'lmstudio',
   'alibaba',
+  'alibaba_api',
 ];
 
 export interface ToolCapabilities {
@@ -81,7 +82,7 @@ export class ToolManager {
       supportsProviderConfig: true,
       supportsMcp: true,
       supportsModelSelection: true,
-      supportedPlans: ['glm_coding_plan_global', 'glm_coding_plan_china', 'openrouter', 'lmstudio', 'alibaba'],
+      supportedPlans: ['glm_coding_plan_global', 'glm_coding_plan_china', 'openrouter', 'lmstudio', 'alibaba', 'alibaba_api'],
       notes: 'Requires Anthropic-compatible endpoints.',
     },
     opencode: {
@@ -123,6 +124,13 @@ export class ToolManager {
       supportedPlans: ALL_PLANS,
       notes: 'MCP is not supported by Pi configuration.',
     },
+    codex: {
+      supportsProviderConfig: true,
+      supportsMcp: false,
+      supportsModelSelection: true,
+      supportedPlans: ALL_PLANS,
+      notes: 'Uses OpenAI-compatible provider config in ~/.codex/config.toml.',
+    },
   };
 
   private readonly managerLoaders: Record<ToolName, () => Promise<ToolAdapter>> = {
@@ -133,6 +141,7 @@ export class ToolManager {
     kimi: async () => (await import('./kimi-manager.js')).kimiManager as ToolAdapter,
     amp: async () => (await import('./amp-manager.js')).ampManager as ToolAdapter,
     pi: async () => (await import('./pi-manager.js')).piManager as ToolAdapter,
+    codex: async () => (await import('./codex-manager.js')).codexManager as ToolAdapter,
   };
 
   constructor() {

@@ -78,6 +78,7 @@ export async function mcpMenu(tool: string): Promise<void> {
 
         const mcpCapableTools = toolManager
           .getSupportedTools()
+          .filter((t) => configManager.getEnabledTools().includes(t))
           .filter((t) => toolManager.getCapabilities(t).supportsMcp);
 
         const { target } = await inquirer.prompt<{ target: 'this' | 'all' }>([

@@ -140,6 +140,12 @@ export function planLabelColored(plan: string): string {
       return chalk.hex('#B388FF')('OpenRouter');
     case 'nvidia':
       return chalk.hex('#76B900')('NVIDIA');
+    case 'lmstudio':
+      return chalk.hex('#6AB0FF')('LM Studio');
+    case 'alibaba':
+      return chalk.hex('#FF6A00')('Alibaba Coding');
+    case 'alibaba_api':
+      return chalk.hex('#FF8C42')('Alibaba API (SG)');
     default:
       return chalk.white(plan);
   }
@@ -158,6 +164,12 @@ export function planLabel(plan: string | undefined): string {
       return 'OpenRouter';
     case 'nvidia':
       return 'NVIDIA';
+    case 'lmstudio':
+      return 'LM Studio';
+    case 'alibaba':
+      return 'Alibaba Coding';
+    case 'alibaba_api':
+      return 'Alibaba API (Singapore)';
     default:
       return plan;
   }
@@ -186,6 +198,8 @@ export function toolLabel(tool: string): string {
       return 'AMP Code';
     case 'pi':
       return 'Pi CLI';
+    case 'codex':
+      return 'Codex CLI';
     default:
       return tool;
   }

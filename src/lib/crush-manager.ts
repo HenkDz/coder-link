@@ -32,10 +32,11 @@ export class CrushManager {
     if (options?.baseUrl?.trim()) {
       return options.baseUrl.trim();
     }
-    // All kimi-like providers use the same default base URL
-    if (plan === 'kimi' || plan === 'openrouter' || plan === 'nvidia') {
-      return 'https://api.moonshot.ai/v1';
-    }
+    if (plan === 'kimi') return 'https://api.moonshot.ai/v1';
+    if (plan === 'openrouter') return 'https://openrouter.ai/api/v1';
+    if (plan === 'nvidia') return 'https://integrate.api.nvidia.com/v1';
+    if (plan === 'alibaba') return 'https://coding-intl.dashscope.aliyuncs.com/v1';
+    if (plan === 'alibaba_api') return 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1';
     return plan === 'glm_coding_plan_global'
       ? 'https://api.z.ai/api/coding/paas/v4'
       : 'https://open.bigmodel.cn/api/coding/paas/v4';
@@ -46,8 +47,14 @@ export class CrushManager {
     const baseUrl = this.getBaseUrl(plan, options);
 
     // Determine provider name for display
-    const providerDisplayName = (plan === 'kimi' || plan === 'openrouter' || plan === 'nvidia')
-      ? 'Kimi Provider'
+    const providerDisplayName = (plan === 'kimi' || plan === 'openrouter' || plan === 'nvidia' || plan === 'alibaba' || plan === 'alibaba_api')
+      ? (
+        plan === 'alibaba'
+          ? 'Alibaba Coding Provider'
+          : plan === 'alibaba_api'
+            ? 'Alibaba API Provider'
+            : 'Kimi Provider'
+      )
       : 'ZAI Provider';
 
     const newConfig = {
@@ -98,6 +105,10 @@ export class CrushManager {
         plan = 'openrouter';
       } else if (baseUrl?.includes('nvidia.com')) {
         plan = 'nvidia';
+      } else if (baseUrl?.includes('coding-intl.dashscope.aliyuncs.com') || baseUrl?.includes('aliyuncs.com/apps/anthropic')) {
+        plan = 'alibaba';
+      } else if (baseUrl?.includes('compatible-mode') || baseUrl?.includes('dashscope-intl.aliyuncs.com')) {
+        plan = 'alibaba_api';
       } else if (baseUrl) {
         plan = 'kimi';
       }
