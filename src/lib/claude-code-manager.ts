@@ -129,12 +129,16 @@ export class ClaudeCodeManager {
       haiku: getHaikuModel()
     };
 
+    // GLM providers use ANTHROPIC_AUTH_TOKEN, others use ANTHROPIC_API_KEY
+    const isGLMProvider = planKey === 'glm_coding_plan_global' || planKey === 'glm_coding_plan_china';
+    const authKeyEnv = isGLMProvider ? 'ANTHROPIC_AUTH_TOKEN' : 'ANTHROPIC_API_KEY';
+
     const newConfig = {
       ...currentSettings,
       env: {
         ...cleanedEnv,
-        // Claude Code provider routing should use API-key auth, not login token auth.
-        ANTHROPIC_API_KEY: apiKey,
+        // GLM uses AUTH_TOKEN, other providers use API_KEY
+        [authKeyEnv]: apiKey,
         ANTHROPIC_BASE_URL: baseUrl,
         // Model configuration - set all three tiers
         ANTHROPIC_DEFAULT_OPUS_MODEL: defaultModels.opus,
