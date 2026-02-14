@@ -13,6 +13,8 @@ import { printError, printSuccess, printWarning, printInfo } from '../utils/outp
 import { startCommand, installHint, createSafeSpinner, pause, getProviderIncompatibility, selectModelId } from './shared.js';
 import { providerSetupFlow } from './provider-menu.js';
 import { mcpMenu } from './mcp-menu.js';
+import { toolSkillsMenu, toolSupportsSkills } from './skills-menu.js';
+import type { ToolWithSkills } from './skills-menu.js';
 
 async function chooseToolProviderPlan(tool: string): Promise<Plan | '__back'> {
   const enabled = new Set(configManager.getEnabledProviders());
@@ -172,7 +174,7 @@ export async function toolMenu(tool: string): Promise<void> {
     console.log();
     printNavigationHints();
 
-    type ToolAction = 'sync_global' | 'switch_profile' | 'change_model' | 'unload' | 'mcp' | 'start' | 'start_new' | 'start_same' | '__back';
+    type ToolAction = 'sync_global' | 'switch_profile' | 'change_model' | 'unload' | 'mcp' | 'skills' | 'start' | 'start_new' | 'start_same' | '__back';
     const choices: Array<{ name: string; value: ToolAction } | inquirer.Separator> = [];
 
     const lastTool = configManager.getLastUsedTool();
@@ -220,11 +222,14 @@ export async function toolMenu(tool: string): Promise<void> {
       choices.push({ name: '🗑 Disconnect Provider from This Tool', value: 'unload' });
     }
 
-    if (capabilities.supportsProviderConfig || capabilities.supportsMcp) {
+    if (capabilities.supportsProviderConfig || capabilities.supportsMcp || toolSupportsSkills(tool)) {
       choices.push(new inquirer.Separator());
     }
     if (capabilities.supportsMcp) {
       choices.push({ name: '🔌 MCP Servers', value: 'mcp' });
+    }
+    if (toolSupportsSkills(tool)) {
+      choices.push({ name: '🎯 Skills', value: 'skills' });
     }
 
     if (!installed) {
@@ -339,6 +344,8 @@ export async function toolMenu(tool: string): Promise<void> {
         await pause();
       } else if (action === 'mcp') {
         await mcpMenu(tool);
+      } else if (action === 'skills') {
+        await toolSkillsMenu(tool as ToolWithSkills);
       } else if (action === 'start') {
         await launchTool(tool);
       } else if (action === 'start_new') {

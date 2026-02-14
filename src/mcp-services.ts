@@ -31,6 +31,27 @@ export const BUILTIN_MCP_SERVICES: MCPService[] = [
       alibaba_api: { GITHUB_TOKEN: '' }
     }
   },
+  {
+    id: 'coolify-mcp',
+    name: 'Coolify',
+    description: 'Coolify server management (requires COOLIFY_BASE_URL and COOLIFY_TOKEN env vars)',
+    protocol: 'stdio',
+    command: 'npx',
+    args: ['-y', 'coolify-mcp-server'],
+    // Coolify credentials should come from environment variables
+    // Set COOLIFY_BASE_URL and COOLIFY_TOKEN before installing
+    requiresAuth: false,
+    envTemplate: {
+      glm_coding_plan_global: { COOLIFY_BASE_URL: '', COOLIFY_TOKEN: '' },
+      glm_coding_plan_china: { COOLIFY_BASE_URL: '', COOLIFY_TOKEN: '' },
+      kimi: { COOLIFY_BASE_URL: '', COOLIFY_TOKEN: '' },
+      openrouter: { COOLIFY_BASE_URL: '', COOLIFY_TOKEN: '' },
+      nvidia: { COOLIFY_BASE_URL: '', COOLIFY_TOKEN: '' },
+      lmstudio: { COOLIFY_BASE_URL: '', COOLIFY_TOKEN: '' },
+      alibaba: { COOLIFY_BASE_URL: '', COOLIFY_TOKEN: '' },
+      alibaba_api: { COOLIFY_BASE_URL: '', COOLIFY_TOKEN: '' }
+    }
+  },
   // Z AI MCP Servers (GLM API)
   {
     id: 'zai-mcp-server',

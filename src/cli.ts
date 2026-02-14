@@ -10,9 +10,10 @@ import type { ToolName } from './lib/tool-manager.js';
 import { runMenu } from './menu/main-menu.js';
 import { runWizard } from './wizard.js';
 import { statusIndicator, planLabel, planLabelColored, toolLabel } from './utils/brand.js';
-import { setOutputFormat, getOutputFormat, printData, printError } from './utils/output.js';
+import { setOutputFormat, getOutputFormat, printData, printError, printInfo } from './utils/output.js';
 import { PROVIDER_PLAN_VALUES } from './utils/providers.js';
 import { BUILTIN_MCP_SERVICES } from './mcp-services.js';
+import type { MCPService } from './lib/tool-manager.js';
 
 const program = new Command();
 
@@ -590,10 +591,309 @@ program
     })
   );
 
+// MCP interactive menu helper
+const BACK_SIGNAL = Symbol('back');
+
+async function mcpInteractiveMenu(): Promise<void> {
+  const mcpTools = getMcpCapableTools();
+  if (mcpTools.length === 0) {
+    printError('No MCP-capable tools enabled', 'Enable at least one tool that supports MCP');
+    process.exit(1);
+  }
+
+  const auth = configManager.getAuth();
+
+  // Main action loop
+  while (true) {
+    // Step 1: Select action
+    const { action } = await inquirer.prompt<{ action: 'install' | 'uninstall' | '__back' }>([
+      {
+        type: 'list',
+        name: 'action',
+        message: 'Action:',
+        choices: [
+          { name: '📦 Install MCPs', value: 'install' },
+          { name: '🗑 Uninstall MCPs', value: 'uninstall' },
+          new inquirer.Separator(),
+          { name: chalk.gray('← Back'), value: '__back' as const },
+        ],
+      },
+    ]);
+
+    if (action === '__back') return;
+
+    if (action === 'install') {
+      const result = await mcpInstallFlow(mcpTools, auth);
+      if (result === BACK_SIGNAL) continue; // Go back to action selection
+    } else if (action === 'uninstall') {
+      const result = await mcpUninstallFlow(mcpTools);
+      if (result === BACK_SIGNAL) continue; // Go back to action selection
+    }
+  }
+}
+
+async function mcpInstallFlow(mcpTools: ToolName[], auth: { plan: string | undefined; apiKey: string | undefined }): Promise<typeof BACK_SIGNAL | void> {
+  // Step 2: Select MCPs to install (with back option)
+  const mcpChoices = [
+    ...BUILTIN_MCP_SERVICES.map((s) => ({
+      name: `${s.name} (${s.id})`,
+      value: s.id,
+      short: s.name,
+    })),
+    new inquirer.Separator(),
+    { name: chalk.gray('← Back'), value: '__back' as const },
+  ];
+
+  const { selectedMcps } = await inquirer.prompt<{ selectedMcps: (string | '__back')[] }>([
+    {
+      type: 'checkbox',
+      name: 'selectedMcps',
+      message: 'Select MCPs to install: (Press <space> to select, <enter> to confirm)',
+      choices: mcpChoices,
+      pageSize: 12,
+    },
+  ]);
+
+  // Check if user wants to go back
+  if (selectedMcps.includes('__back') || selectedMcps.length === 0) {
+    return BACK_SIGNAL;
+  }
+
+  const mcpsToInstall = selectedMcps.filter((id): id is string => id !== '__back');
+  
+  if (mcpsToInstall.length === 0) {
+    return BACK_SIGNAL;
+  }
+
+  // Check auth for services that require it
+  const servicesRequiringAuth = mcpsToInstall.filter((id) => {
+    const s = BUILTIN_MCP_SERVICES.find((svc) => svc.id === id);
+    return s?.requiresAuth;
+  });
+
+  if (!auth.plan) {
+    printError(
+      i18n.t('auth.not_set'),
+      'Run "coder-link auth <provider> <token>" first to select a provider'
+    );
+    process.exit(1);
+  }
+  if (servicesRequiringAuth.length > 0 && !auth.apiKey) {
+    printError(
+      `Provider API key is required for: ${servicesRequiringAuth.join(', ')}`,
+      'Configure your provider first'
+    );
+    process.exit(1);
+  }
+
+  // Step 2.5: Collect missing credentials for MCPs that need env vars (with back option)
+  const envVarPrompts: Array<{ mcp: MCPService; varName: string }> = [];
+  for (const mcpId of mcpsToInstall) {
+    const service = BUILTIN_MCP_SERVICES.find((s) => s.id === mcpId);
+    if (!service?.envTemplate) continue;
+    
+    const planEnv = service.envTemplate[auth.plan || ''] || Object.values(service.envTemplate)[0] || {};
+    
+    for (const [varName] of Object.entries(planEnv)) {
+      if (!process.env[varName]) {
+        envVarPrompts.push({ mcp: service, varName });
+      }
+    }
+  }
+
+  // Prompt for missing env vars with option to skip or go back
+  if (envVarPrompts.length > 0) {
+    console.log(chalk.yellow('\nSome MCPs require environment variables:'));
+    
+    // First ask if user wants to provide them or skip
+    const { provideCreds } = await inquirer.prompt<{ provideCreds: 'provide' | 'skip' | '__back' }>([
+      {
+        type: 'list',
+        name: 'provideCreds',
+        message: `Missing ${envVarPrompts.length} env var(s). What would you like to do?`,
+        choices: [
+          { name: '✏️  Provide credentials now', value: 'provide' },
+          { name: '⏭️  Skip (MCPs may not work without credentials)', value: 'skip' },
+          new inquirer.Separator(),
+          { name: chalk.gray('← Back'), value: '__back' as const },
+        ],
+      },
+    ]);
+
+    if (provideCreds === '__back') {
+      return BACK_SIGNAL;
+    }
+
+    if (provideCreds === 'provide') {
+      const seenVars = new Set<string>();
+      for (const { mcp, varName } of envVarPrompts) {
+        if (seenVars.has(varName)) continue;
+        seenVars.add(varName);
+
+        const { value } = await inquirer.prompt<{ value: string }>([
+          {
+            type: 'input',
+            name: 'value',
+            message: `${varName} (for ${mcp.name}):`,
+            validate: (input) => input.trim().length > 0 || `${varName} is required`,
+          },
+        ]);
+        process.env[varName] = value.trim();
+      }
+    }
+    console.log();
+  }
+
+  // Step 3: Select target (with back option)
+  const { target } = await inquirer.prompt<{ target: ToolName | 'all' | '__back' }>([
+    {
+      type: 'list',
+      name: 'target',
+      message: 'Install to:',
+      choices: [
+        { name: `All MCP-capable tools (${mcpTools.length})`, value: 'all' },
+        new inquirer.Separator(),
+        ...mcpTools.map((t) => ({
+          name: toolLabel(t),
+          value: t,
+        })),
+        new inquirer.Separator(),
+        { name: chalk.gray('← Back'), value: '__back' as const },
+      ],
+    },
+  ]);
+
+  if (target === '__back') {
+    return BACK_SIGNAL;
+  }
+
+  const targetTools = target === 'all' ? mcpTools : [target];
+  let totalSuccess = 0;
+  let totalAttempts = targetTools.length * mcpsToInstall.length;
+
+  for (const mcpId of mcpsToInstall) {
+    const service = BUILTIN_MCP_SERVICES.find((s) => s.id === mcpId)!;
+    for (const tool of targetTools) {
+      try {
+        await toolManager.installMCP(tool, service, auth.apiKey || '', auth.plan);
+        totalSuccess++;
+      } catch {
+        // skip individual failures
+      }
+    }
+  }
+
+  console.log(chalk.green(`✓ Installed ${totalSuccess}/${totalAttempts} MCP configurations`));
+  if (totalSuccess < totalAttempts) {
+    printInfo('Some installations skipped due to compatibility or tool-specific constraints.');
+  }
+}
+
+async function mcpUninstallFlow(mcpTools: ToolName[]): Promise<typeof BACK_SIGNAL | void> {
+  // Get all installed MCPs across all tools
+  const allInstalled = new Map<string, Set<ToolName>>();
+  for (const tool of mcpTools) {
+    const installed = await toolManager.getInstalledMCPs(tool);
+    for (const id of installed) {
+      if (!allInstalled.has(id)) allInstalled.set(id, new Set());
+      allInstalled.get(id)!.add(tool);
+    }
+  }
+
+  if (allInstalled.size === 0) {
+    printInfo('No MCPs are currently installed.');
+    return;
+  }
+
+  // Step 2: Select MCPs to uninstall (with back option)
+  const mcpChoices = [
+    ...Array.from(allInstalled.entries()).map(([id, tools]) => ({
+      name: `${id} (${tools.size} tool${tools.size > 1 ? 's' : ''})`,
+      value: id,
+      short: id,
+    })),
+    new inquirer.Separator(),
+    { name: chalk.gray('← Back'), value: '__back' as const },
+  ];
+
+  const { selectedMcps } = await inquirer.prompt<{ selectedMcps: (string | '__back')[] }>([
+    {
+      type: 'checkbox',
+      name: 'selectedMcps',
+      message: 'Select MCPs to uninstall: (Press <space> to select, <enter> to confirm)',
+      choices: mcpChoices,
+      pageSize: 12,
+    },
+  ]);
+
+  // Check if user wants to go back
+  if (selectedMcps.includes('__back') || selectedMcps.length === 0) {
+    return BACK_SIGNAL;
+  }
+
+  const mcpsToUninstall = selectedMcps.filter((id): id is string => id !== '__back');
+  
+  if (mcpsToUninstall.length === 0) {
+    return BACK_SIGNAL;
+  }
+
+  // Step 3: Select target (with back option)
+  const { target } = await inquirer.prompt<{ target: ToolName | 'all' | '__back' }>([
+    {
+      type: 'list',
+      name: 'target',
+      message: 'Uninstall from:',
+      choices: [
+        { name: `All tools`, value: 'all' },
+        new inquirer.Separator(),
+        ...mcpTools.map((t) => ({
+          name: toolLabel(t),
+          value: t,
+        })),
+        new inquirer.Separator(),
+        { name: chalk.gray('← Back'), value: '__back' as const },
+      ],
+    },
+  ]);
+
+  if (target === '__back') {
+    return BACK_SIGNAL;
+  }
+
+  const targetTools = target === 'all' ? mcpTools : [target];
+  let totalSuccess = 0;
+  let totalAttempts = 0;
+
+  for (const mcpId of mcpsToUninstall) {
+    for (const tool of targetTools) {
+      const installed = await toolManager.getInstalledMCPs(tool);
+      if (installed.includes(mcpId)) {
+        totalAttempts++;
+        try {
+          await toolManager.uninstallMCP(tool, mcpId);
+          totalSuccess++;
+        } catch {
+          // skip individual failures
+        }
+      }
+    }
+  }
+
+  if (totalAttempts === 0) {
+    printInfo('Selected MCPs were not installed in the target tools.');
+  } else {
+    console.log(chalk.green(`✓ Uninstalled ${totalSuccess}/${totalAttempts} MCP configurations`));
+  }
+}
+
 // MCP commands
 program
   .command('mcp')
-  .description('Manage MCP services')
+  .description('Manage MCP services (interactive when no subcommand)')
+  .action(async () => {
+    // When no subcommand, launch interactive menu
+    await mcpInteractiveMenu();
+  })
   .addCommand(new Command('list')
     .description('List available MCP services')
     .action(async () => {
@@ -636,10 +936,16 @@ program
       }
     })
   )
-  .addCommand(new Command('install <service>')
-    .description('Install an MCP service')
+  .addCommand(new Command('install [service]')
+    .description('Install an MCP service (interactive if no service specified)')
     .option('-t, --tool <tool>', 'Target tool (defaults to last used MCP-capable tool)')
-    .action(async (serviceId: string, options: { tool?: string }) => {
+    .action(async (serviceId: string | undefined, options: { tool?: string }) => {
+      // If no service provided, launch interactive menu
+      if (!serviceId) {
+        await mcpInteractiveMenu();
+        return;
+      }
+
       try {
         const targetTool = resolveMcpTool(options.tool);
         const auth = configManager.getAuth();

@@ -37,6 +37,7 @@ import {
  * - OpenRouter: https://openrouter.ai/api → calls /api/v1/messages (OpenRouter supports Anthropic format)
  * - Alibaba Coding Plan: https://coding-intl.dashscope.aliyuncs.com/apps/anthropic → calls /apps/anthropic/v1/messages
  * - LM Studio: http://localhost:1234 → calls /v1/messages (LM Studio 0.4.1+ supports Anthropic format)
+ * - ZenMux: https://zenmux.ai/api/anthropic → calls /api/anthropic/v1/messages (ZenMux supports Anthropic format)
  * 
  * NOT supported (OpenAI-compatible only, no /v1/messages endpoint):
  * - Kimi/Moonshot: Only provides /v1/chat/completions
@@ -129,16 +130,19 @@ export class ClaudeCodeManager {
       haiku: getHaikuModel()
     };
 
-    // GLM providers use ANTHROPIC_AUTH_TOKEN, others use ANTHROPIC_API_KEY
+    // GLM and ZenMux providers use ANTHROPIC_AUTH_TOKEN, others use ANTHROPIC_API_KEY
     const isGLMProvider = planKey === 'glm_coding_plan_global' || planKey === 'glm_coding_plan_china';
-    const authKeyEnv = isGLMProvider ? 'ANTHROPIC_AUTH_TOKEN' : 'ANTHROPIC_API_KEY';
+    const isZenMuxProvider = planKey === 'zenmux';
+    const authKeyEnv = (isGLMProvider || isZenMuxProvider) ? 'ANTHROPIC_AUTH_TOKEN' : 'ANTHROPIC_API_KEY';
 
     const newConfig = {
       ...currentSettings,
       env: {
         ...cleanedEnv,
-        // GLM uses AUTH_TOKEN, other providers use API_KEY
+        // GLM/ZenMux use AUTH_TOKEN, other providers use API_KEY
         [authKeyEnv]: apiKey,
+        // Explicitly clear ANTHROPIC_API_KEY to avoid conflicts (per ZenMux docs)
+        ANTHROPIC_API_KEY: '',
         ANTHROPIC_BASE_URL: baseUrl,
         // Model configuration - set all three tiers
         ANTHROPIC_DEFAULT_OPUS_MODEL: defaultModels.opus,
@@ -147,7 +151,7 @@ export class ClaudeCodeManager {
         // Subagents use sonnet by default
         CLAUDE_CODE_SUBAGENT_MODEL: defaultModels.sonnet,
         API_TIMEOUT_MS: '3000000',
-        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: 1
+        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1'
       }
     };
 

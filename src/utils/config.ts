@@ -16,7 +16,8 @@ export type Plan =
   | 'nvidia'
   | 'lmstudio'
   | 'alibaba'
-  | 'alibaba_api';
+  | 'alibaba_api'
+  | 'zenmux';
 export type ToolId =
   | 'claude-code'
   | 'opencode'
@@ -36,6 +37,7 @@ export const ALL_PROVIDER_PLANS: Plan[] = [
   'lmstudio',
   'alibaba',
   'alibaba_api',
+  'zenmux',
 ];
 
 export const ALL_TOOL_IDS: ToolId[] = [
@@ -56,6 +58,7 @@ export const KIMI_LIKE_PLANS: ReadonlySet<string> = new Set([
   'lmstudio',
   'alibaba',
   'alibaba_api',
+  'zenmux',
 ]);
 
 export type OpenAICompatiblePlan = Exclude<Plan, 'glm_coding_plan_global' | 'glm_coding_plan_china'>;
@@ -109,6 +112,7 @@ export interface Config {
     lmstudio?: ProviderConfig;
     alibaba?: ProviderConfig;
     alibaba_api?: ProviderConfig;
+    zenmux?: ProviderConfig;
   };
 }
 
@@ -626,6 +630,14 @@ export class ConfigManager {
       anthropicModel: 'glm-5',
       source: 'glm-china',
       maxContextSize: 128000,
+    },
+    zenmux: {
+      baseUrl: 'https://zenmux.ai/api/v1',
+      anthropicBaseUrl: 'https://zenmux.ai/api/anthropic',
+      model: 'volcengine/doubao-seed-2.0-code',
+      anthropicModel: 'volcengine/doubao-seed-2.0-code',
+      source: 'zenmux',
+      maxContextSize: 256000,
     }
   };
 
@@ -736,6 +748,7 @@ export class ConfigManager {
     if (this.config.providers?.lmstudio) delete this.config.providers.lmstudio.api_key;
     if (this.config.providers?.alibaba) delete this.config.providers.alibaba.api_key;
     if (this.config.providers?.alibaba_api) delete this.config.providers.alibaba_api.api_key;
+    if (this.config.providers?.zenmux) delete this.config.providers.zenmux.api_key;
     this.save();
   }
 

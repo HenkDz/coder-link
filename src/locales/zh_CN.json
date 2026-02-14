@@ -23,6 +23,15 @@
     "install_success": "MCP服务 {service} 已安装",
     "uninstall_success": "MCP服务 {service} 已卸载"
   },
+  "skills": {
+    "list_header": "代理技能:",
+    "create_success": "技能 {skill} 已创建",
+    "update_success": "技能 {skill} 已更新",
+    "delete_success": "技能 {skill} 已删除",
+    "not_found": "未找到技能",
+    "invalid_name": "技能名称无效。必须是小写字母和连字符。",
+    "exists": "技能已存在"
+  },
   "doctor": {
     "header": "系统配置检查:",
     "config_path": "配置文件路径: {path}",

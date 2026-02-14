@@ -23,6 +23,15 @@
     "install_success": "MCP service {service} installed",
     "uninstall_success": "MCP service {service} uninstalled"
   },
+  "skills": {
+    "list_header": "Agent Skills:",
+    "create_success": "Skill {skill} created",
+    "update_success": "Skill {skill} updated",
+    "delete_success": "Skill {skill} deleted",
+    "not_found": "Skill not found",
+    "invalid_name": "Invalid skill name. Must be lowercase with hyphens.",
+    "exists": "Skill already exists"
+  },
   "doctor": {
     "header": "System Configuration Check:",
     "config_path": "Config path: {path}",

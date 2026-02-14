@@ -13,7 +13,13 @@ import {
 } from './provider-registry.js';
 import type { Plan } from '../utils/config.js';
 
-const DEFAULT_PROVIDER_ID = 'managed:moonshot-ai';
+// Provider ID is now dynamic based on the plan
+function getProviderId(plan: Plan): string {
+  return `managed:${plan}`;
+}
+
+// Default provider ID for managed providers (legacy compatibility)
+const DEFAULT_PROVIDER_ID = 'managed:kimi';
 
 type AnyRecord = Record<string, any>;
 
@@ -98,7 +104,7 @@ export class KimiManager {
   private ensureProvider(config: AnyRecord, plan: Plan, apiKey: string, options?: ProviderOptions): void {
     config.providers = config.providers && typeof config.providers === 'object' ? config.providers : {};
 
-    const providerId = options?.providerId?.trim() || DEFAULT_PROVIDER_ID;
+    const providerId = options?.providerId?.trim() || getProviderId(plan);
     const baseUrl = options?.baseUrl?.trim() || getBaseUrl(plan, 'openai');
 
     // Use the OpenAI-legacy provider type for all Kimi-compatible endpoints.
@@ -117,7 +123,7 @@ export class KimiManager {
   private ensureModel(config: AnyRecord, plan: Plan, options?: ProviderOptions): void {
     config.models = config.models && typeof config.models === 'object' ? config.models : {};
 
-    const providerId = options?.providerId?.trim() || DEFAULT_PROVIDER_ID;
+    const providerId = options?.providerId?.trim() || getProviderId(plan);
     const modelId = options?.model?.trim() || getDefaultModel(plan);
     const maxCtx = options?.maxContextSize || 262144;
 
@@ -192,15 +198,18 @@ export class KimiManager {
     if (!existsSync(this.configPath)) return;
 
     const config = this.readConfig();
-    if (config.providers && typeof config.providers === 'object' && config.providers[DEFAULT_PROVIDER_ID]) {
-      // Avoid destructive deletes; just clear the key.
-      const provider = config.providers[DEFAULT_PROVIDER_ID];
+    if (!config.providers || typeof config.providers !== 'object') return;
+    
+    // Clear API keys from all managed providers
+    for (const providerId of Object.keys(config.providers)) {
+      if (!providerId.startsWith('managed:')) continue;
+      const provider = config.providers[providerId];
       if (provider && typeof provider === 'object') {
         provider.api_key = '';
-        config.providers[DEFAULT_PROVIDER_ID] = provider;
+        config.providers[providerId] = provider;
       }
-      this.writeConfig(config);
     }
+    this.writeConfig(config);
   }
 
   isMCPInstalled(mcpId: string): boolean {

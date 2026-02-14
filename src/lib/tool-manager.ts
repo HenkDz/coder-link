@@ -50,11 +50,13 @@ const ALL_PLANS: Plan[] = [
   'lmstudio',
   'alibaba',
   'alibaba_api',
+  'zenmux',
 ];
 
 export interface ToolCapabilities {
   supportsProviderConfig: boolean;
   supportsMcp: boolean;
+  supportsSkills: boolean;
   supportsModelSelection: boolean;
   supportedPlans: Plan[];
   notes?: string;
@@ -81,19 +83,22 @@ export class ToolManager {
     'claude-code': {
       supportsProviderConfig: true,
       supportsMcp: true,
+      supportsSkills: true,
       supportsModelSelection: true,
-      supportedPlans: ['glm_coding_plan_global', 'glm_coding_plan_china', 'openrouter', 'lmstudio', 'alibaba', 'alibaba_api'],
+      supportedPlans: ['glm_coding_plan_global', 'glm_coding_plan_china', 'openrouter', 'lmstudio', 'alibaba', 'alibaba_api', 'zenmux'],
       notes: 'Requires Anthropic-compatible endpoints.',
     },
     opencode: {
       supportsProviderConfig: true,
       supportsMcp: true,
+      supportsSkills: true,
       supportsModelSelection: true,
       supportedPlans: ALL_PLANS,
     },
     crush: {
       supportsProviderConfig: true,
       supportsMcp: true,
+      supportsSkills: false,
       supportsModelSelection: false,
       supportedPlans: ALL_PLANS,
       notes: 'Model switching is not persisted in Crush provider config.',
@@ -101,18 +106,21 @@ export class ToolManager {
     'factory-droid': {
       supportsProviderConfig: true,
       supportsMcp: true,
+      supportsSkills: false,
       supportsModelSelection: true,
       supportedPlans: ALL_PLANS,
     },
     kimi: {
       supportsProviderConfig: true,
       supportsMcp: true,
+      supportsSkills: false,
       supportsModelSelection: true,
       supportedPlans: ALL_PLANS,
     },
     amp: {
       supportsProviderConfig: false,
       supportsMcp: false,
+      supportsSkills: false,
       supportsModelSelection: false,
       supportedPlans: [],
       notes: 'Launch-only integration for now.',
@@ -120,6 +128,7 @@ export class ToolManager {
     pi: {
       supportsProviderConfig: true,
       supportsMcp: false,
+      supportsSkills: false,
       supportsModelSelection: true,
       supportedPlans: ALL_PLANS,
       notes: 'MCP is not supported by Pi configuration.',
@@ -127,6 +136,7 @@ export class ToolManager {
     codex: {
       supportsProviderConfig: true,
       supportsMcp: false,
+      supportsSkills: false,
       supportsModelSelection: true,
       supportedPlans: ALL_PLANS,
       notes: 'Uses OpenAI-compatible provider config in ~/.codex/config.toml.',

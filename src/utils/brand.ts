@@ -146,6 +146,8 @@ export function planLabelColored(plan: string): string {
       return chalk.hex('#FF6A00')('Alibaba Coding');
     case 'alibaba_api':
       return chalk.hex('#FF8C42')('Alibaba API (SG)');
+    case 'zenmux':
+      return chalk.hex('#FF69B4')('ZenMux');
     default:
       return chalk.white(plan);
   }
@@ -170,6 +172,8 @@ export function planLabel(plan: string | undefined): string {
       return 'Alibaba Coding';
     case 'alibaba_api':
       return 'Alibaba API (Singapore)';
+    case 'zenmux':
+      return 'ZenMux';
     default:
       return plan;
   }

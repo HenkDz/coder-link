@@ -78,7 +78,7 @@ export const PROVIDER_CONFIGS: Record<Plan, ProviderConfig> = {
       anthropic: 'https://api.z.ai/api/anthropic',
     },
     defaultModel: 'glm-5',
-    commonModels: ['glm-5', 'glm-4.7', 'glm-4.7-flash', 'glm-4-plus'],
+    commonModels: ['glm-5', 'glm-4.7', 'glm-4.7-flash', 'glm-4.7-flashx'],
     detectionPatterns: ['api.z.ai'],
     supportsThinking: true,
     maxContextSize: 128000,
@@ -94,7 +94,7 @@ export const PROVIDER_CONFIGS: Record<Plan, ProviderConfig> = {
       anthropic: 'https://open.bigmodel.cn/api/anthropic',
     },
     defaultModel: 'glm-5',
-    commonModels: ['glm-5', 'glm-4.7', 'glm-4.7-flash', 'glm-4-plus'],
+    commonModels: ['glm-5', 'glm-4.7', 'glm-4.7-flash', 'glm-4.7-flashx'],
     detectionPatterns: ['open.bigmodel.cn'],
     supportsThinking: true,
     maxContextSize: 128000,
@@ -210,6 +210,22 @@ export const PROVIDER_CONFIGS: Record<Plan, ProviderConfig> = {
     supportsThinking: false,
     maxContextSize: 262144,
     maxOutputTokens: 65536, // qwen3-max has lower limit
+  },
+
+  zenmux: {
+    id: 'zenmux',
+    displayName: 'ZenMux',
+    shortName: 'ZenMux',
+    urls: {
+      openai: 'https://zenmux.ai/api/v1',
+      anthropic: 'https://zenmux.ai/api/anthropic',
+    },
+    defaultModel: 'volcengine/doubao-seed-2.0-code',
+    commonModels: ['volcengine/doubao-seed-2.0-code'],
+    detectionPatterns: ['zenmux.ai'],
+    supportsThinking: true,
+    maxContextSize: 256000,
+    maxOutputTokens: 32000,
   },
 };
 
@@ -365,6 +381,9 @@ function normalizeProviderUrl(url: string, plan: Plan, protocol: Protocol): stri
     case 'alibaba_api':
       return normalizeAlibabaUrl(normalized, lower, protocol, config);
 
+    case 'zenmux':
+      return normalizeZenMuxUrl(normalized, lower, protocol, config);
+
     default:
       return normalized;
   }
@@ -418,6 +437,28 @@ function normalizeAlibabaUrl(
     }
     if (lower.endsWith('/v1')) {
       return normalized.replace(/\/v1$/i, '/apps/anthropic');
+    }
+    return config.urls.anthropic || normalized;
+  }
+  return normalized;
+}
+
+/**
+ * Normalize ZenMux URLs
+ */
+function normalizeZenMuxUrl(
+  normalized: string,
+  lower: string,
+  protocol: Protocol,
+  config: ProviderConfig
+): string {
+  if (protocol === 'anthropic') {
+    if (lower.endsWith('/api/anthropic')) return normalized;
+    if (lower.endsWith('/api/v1')) {
+      return normalized.replace(/\/api\/v1$/i, '/api/anthropic');
+    }
+    if (lower.endsWith('/v1')) {
+      return normalized.replace(/\/v1$/i, '/api/anthropic');
     }
     return config.urls.anthropic || normalized;
   }
