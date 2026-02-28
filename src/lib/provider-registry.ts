@@ -173,7 +173,7 @@ export const PROVIDER_CONFIGS: Record<Plan, ProviderConfig> = {
     maxOutputTokens: 131072,
     // Configurable defaults for LM Studio (Recommendation #4)
     configurableDefaults: {
-      defaultPorts: [1234, 1235],
+      defaultPorts: [1234, 1235, 8766],
       allowCustomBaseUrl: true,
     },
     // Requires healthcheck on startup (Recommendation #1)
@@ -568,7 +568,7 @@ const LM_STUDIO_HEALTH_TIMEOUT = 3000;
  */
 function getLMStudioConfiguredPorts(): number[] {
   const config = PROVIDER_CONFIGS.lmstudio;
-  return config.configurableDefaults?.defaultPorts || [1234, 1235];
+  return config.configurableDefaults?.defaultPorts || [1234, 1235, 8766];
 }
 
 /**

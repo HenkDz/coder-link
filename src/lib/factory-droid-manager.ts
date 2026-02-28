@@ -103,7 +103,20 @@ export class FactoryDroidManager {
   }
 
   private getDisplayNameFilters(): string[] {
-    return Object.values(PROVIDER_CONFIGS).map((c) => c.displayName);
+    // Match by short name which is common across format variations
+    // e.g., both "GLM Coding Plan Global" and "GLM Coding Plan (Global)" contain "GLM_Global" pattern
+    // but we also need to match legacy short names
+    return [
+      'GLM',           // Catches "GLM Coding Plan Global" and "GLM Coding Plan (Global)" and "GLM-4.7"
+      'Kimi',          // Catches "Kimi (Moonshot)" and variants
+      'OpenRouter',    // Catches OpenRouter variants
+      'NVIDIA',        // Catches NVIDIA variants
+      'LM Studio',     // Catches LM Studio variants
+      'Alibaba',       // Catches Alibaba variants (Qwen)
+      'ZenMux',        // Catches ZenMux variants
+      'Qwen',          // Catches Qwen via Alibaba
+      'Moonshot',      // Catches Moonshot/Kimi variants
+    ];
   }
 
   // --------------------------------------------------------------------------

@@ -204,6 +204,8 @@ export function toolLabel(tool: string): string {
       return 'Pi CLI';
     case 'codex':
       return 'Codex CLI';
+    case 'mastra':
+      return 'Mastra Code';
     default:
       return tool;
   }

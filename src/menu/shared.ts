@@ -77,6 +77,8 @@ export function startCommand(tool: string): { cmd: string; args: string[] } {
       return { cmd: 'pi', args: [] };
     case 'codex':
       return { cmd: 'codex', args: [] };
+    case 'mastra':
+      return { cmd: 'mastracode', args: [] };
     default:
       return { cmd: tool, args: [] };
   }
@@ -106,6 +108,8 @@ export function installHint(tool: string): { label: string; command?: string } {
       return { label: 'Open Factory Droid install page', command: openUrlCommand('https://factory.ai/') };
     case 'codex':
       return { label: 'Install Codex CLI', command: 'npm install -g @openai/codex' };
+    case 'mastra':
+      return { label: 'Install Mastra Code', command: 'npm install -g mastracode' };
     default:
       return { label: 'Install instructions', command: undefined };
   }

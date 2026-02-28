@@ -26,7 +26,8 @@ export type ToolId =
   | 'kimi'
   | 'amp'
   | 'pi'
-  | 'codex';
+  | 'codex'
+  | 'mastra';
 
 export const ALL_PROVIDER_PLANS: Plan[] = [
   'glm_coding_plan_global',
@@ -49,6 +50,7 @@ export const ALL_TOOL_IDS: ToolId[] = [
   'amp',
   'pi',
   'codex',
+  'mastra',
 ];
 
 export const KIMI_LIKE_PLANS: ReadonlySet<string> = new Set([

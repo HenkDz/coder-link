@@ -15,12 +15,15 @@ A CLI that links coding tools to models from multiple providers.
 ## Screenshots
 
 ### Main Menu
+
 ![Main Menu](screenshots/main.png)
 
 ### Provider Configuration
+
 ![Provider Configuration](screenshots/provider-config.png)
 
 ### Coding Tools
+
 ![Coding Tools](screenshots/coding-tools.png)
 
 ## Supported Coding Tools
@@ -75,23 +78,27 @@ The wizard will help you complete:
 ## Command List
 
 ### Show help
+
 ```bash
 coder-link -h
 coder-link --help
 ```
 
 ### Show version
+
 ```bash
 coder-link -v
 coder-link --version
 ```
 
 ### Run the initialization wizard
+
 ```bash
 coder-link init
 ```
 
 ### Language management
+
 ```bash
 coder-link lang show              # Display the current language
 coder-link lang set zh_CN         # Switch to Chinese
@@ -100,6 +107,7 @@ coder-link lang --help            # Show help for language commands
 ```
 
 ### API key management
+
 ```bash
 coder-link auth                              # Interactively set key
 coder-link auth glm_coding_plan_global <token>   # Choose Global plan and set key
@@ -113,6 +121,7 @@ coder-link auth --help                        # Show help for auth commands
 ```
 
 ### Tool management
+
 ```bash
 coder-link tools list             # List all supported tools and their status
 coder-link tools install <tool>   # Install a coding tool
@@ -120,6 +129,7 @@ coder-link tools uninstall <tool> # Uninstall a coding tool
 ```
 
 ### MCP management
+
 ```bash
 coder-link mcp list               # List available MCP services
 coder-link mcp installed          # List installed MCP services
@@ -128,6 +138,7 @@ coder-link mcp uninstall <service> # Uninstall an MCP service
 ```
 
 ### Health check
+
 ```bash
 coder-link doctor                 # Inspect system configuration and tool status
 ```
@@ -145,21 +156,25 @@ api_key: your-api-key-here     # API key
 ## Provider Details
 
 ### GLM Coding Plan (Global)
+
 - **Base URL**: `https://api.z.ai/api/anthropic` (Claude Code) or `https://api.z.ai/api/coding/paas/v4` (others)
 - **Models**: GLM-5, GLM-4.7, GLM-4.6, GLM-4.5-air
 - Get your API key from [Z.AI Open Platform](https://z.ai/model-api)
 
 ### GLM Coding Plan (China)
+
 - **Base URL**: `https://open.bigmodel.cn/api/anthropic` (Claude Code) or `https://open.bigmodel.cn/api/coding/paas/v4` (others)
 - **Models**: GLM-5, GLM-4.7, GLM-4.6, GLM-4.5-air
 - Get your API key from [Z.AI Open Platform](https://z.ai/model-api)
 
 ### OpenRouter
+
 - **Base URL**: `https://openrouter.ai/api/v1`
 - **Models**: Various LLMs including Claude, GPT, and more
 - Get your API key from [OpenRouter.ai](https://openrouter.ai/keys)
 
 ### NVIDIA
+
 - **Base URL**: Via NVIDIA's API gateway
 - **Models**: Various NVIDIA-hosted models
 - Sign up for access at [NVIDIA's developer portal](https://developer.nvidia.com/)

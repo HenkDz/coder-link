@@ -26,9 +26,11 @@ type AnyRecord = Record<string, any>;
 export class KimiManager {
   static instance: KimiManager | null = null;
   private configPath: string;
+  private mcpJsonPath: string;
 
   constructor() {
     this.configPath = join(homedir(), '.kimi', 'config.toml');
+    this.mcpJsonPath = join(homedir(), '.kimi', 'mcp.json');
   }
 
   static getInstance(): KimiManager {
@@ -72,6 +74,50 @@ export class KimiManager {
       logger.logError('KimiManager.writeConfig', error);
       throw new Error(`Failed to write Kimi config at ${this.configPath}`);
     }
+  }
+
+  private readMcpJson(): AnyRecord {
+    try {
+      if (!existsSync(this.mcpJsonPath)) return { mcpServers: {} };
+      const text = readFileSync(this.mcpJsonPath, 'utf-8');
+      const parsed = JSON.parse(text);
+      return parsed && typeof parsed === 'object' ? parsed : { mcpServers: {} };
+    } catch (error) {
+      logger.logError('KimiManager.readMcpJson', error);
+      return { mcpServers: {} };
+    }
+  }
+
+  private writeMcpJson(config: AnyRecord): void {
+    try {
+      this.ensureConfigDir();
+      const text = JSON.stringify(config, null, 2);
+      writeFileSync(this.mcpJsonPath, text, 'utf-8');
+    } catch (error) {
+      logger.logError('KimiManager.writeMcpJson', error);
+      throw new Error(`Failed to write Kimi mcp.json at ${this.mcpJsonPath}`);
+    }
+  }
+
+  private convertTomlMcpToJsonMcp(tomlServer: AnyRecord): AnyRecord {
+    const jsonServer: AnyRecord = {};
+    
+    if (tomlServer.type === 'stdio') {
+      jsonServer.command = tomlServer.command;
+      if (tomlServer.args && tomlServer.args.length > 0) {
+        jsonServer.args = tomlServer.args;
+      }
+      if (tomlServer.env && Object.keys(tomlServer.env).length > 0) {
+        jsonServer.env = tomlServer.env;
+      }
+    } else if (tomlServer.type === 'http' || tomlServer.type === 'sse') {
+      jsonServer.url = tomlServer.url;
+      if (tomlServer.headers && Object.keys(tomlServer.headers).length > 0) {
+        jsonServer.headers = tomlServer.headers;
+      }
+    }
+    
+    return jsonServer;
   }
 
   private ensureMcpSilent(config: AnyRecord): boolean {
@@ -267,6 +313,33 @@ export class KimiManager {
     return status;
   }
 
+  /**
+   * Sync existing MCP servers from config.toml to mcp.json
+   * Useful for migrating existing installations
+   */
+  async syncMcpToJson(): Promise<void> {
+    if (!existsSync(this.configPath)) return;
+
+    const config = this.readConfig();
+    const servers = config?.mcp?.servers;
+    if (!servers || typeof servers !== 'object') return;
+
+    const mcpJson = this.readMcpJson();
+    mcpJson.mcpServers = mcpJson.mcpServers && typeof mcpJson.mcpServers === 'object' ? mcpJson.mcpServers : {};
+
+    let changed = false;
+    for (const [id, server] of Object.entries(servers)) {
+      if (!(id in mcpJson.mcpServers)) {
+        mcpJson.mcpServers[id] = this.convertTomlMcpToJsonMcp(server as AnyRecord);
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      this.writeMcpJson(mcpJson);
+    }
+  }
+
   async installMCP(mcp: MCPService, apiKey: string, plan: string): Promise<void> {
     if (!existsSync(this.configPath)) {
       // Ensure base config exists before editing MCP servers
@@ -330,6 +403,16 @@ export class KimiManager {
     }
 
     this.writeConfig(config);
+
+    // Also write to mcp.json
+    const mcpJson = this.readMcpJson();
+    mcpJson.mcpServers = mcpJson.mcpServers && typeof mcpJson.mcpServers === 'object' ? mcpJson.mcpServers : {};
+    
+    // Convert the TOML format server config to mcp.json format
+    const tomlServer = config.mcp.servers[mcp.id];
+    mcpJson.mcpServers[mcp.id] = this.convertTomlMcpToJsonMcp(tomlServer);
+    
+    this.writeMcpJson(mcpJson);
   }
 
   async uninstallMCP(mcpId: string): Promise<void> {
@@ -342,6 +425,13 @@ export class KimiManager {
 
     delete config.mcp.servers[mcpId];
     this.writeConfig(config);
+
+    // Also remove from mcp.json
+    const mcpJson = this.readMcpJson();
+    if (mcpJson.mcpServers && typeof mcpJson.mcpServers === 'object') {
+      delete mcpJson.mcpServers[mcpId];
+      this.writeMcpJson(mcpJson);
+    }
   }
 }
 

@@ -4,6 +4,7 @@ export interface MCPService {
   id: string;
   name: string;
   description?: string;
+  supportedPlans?: Plan[];
   protocol: 'stdio' | 'sse' | 'streamable-http';
 
   // stdio
@@ -37,9 +38,9 @@ export interface ProviderOptions {
   maxContextSize?: number;
 }
 
-export type ToolName = 'claude-code' | 'opencode' | 'crush' | 'factory-droid' | 'kimi' | 'amp' | 'pi' | 'codex';
+export type ToolName = 'claude-code' | 'opencode' | 'crush' | 'factory-droid' | 'kimi' | 'amp' | 'pi' | 'codex' | 'mastra';
 
-const TOOL_NAMES: ToolName[] = ['claude-code', 'opencode', 'crush', 'factory-droid', 'kimi', 'amp', 'pi', 'codex'];
+const TOOL_NAMES: ToolName[] = ['claude-code', 'opencode', 'crush', 'factory-droid', 'kimi', 'amp', 'pi', 'codex', 'mastra'];
 
 const ALL_PLANS: Plan[] = [
   'glm_coding_plan_global',
@@ -141,6 +142,14 @@ export class ToolManager {
       supportedPlans: ALL_PLANS,
       notes: 'Uses OpenAI-compatible provider config in ~/.codex/config.toml.',
     },
+    mastra: {
+      supportsProviderConfig: false, // Only built-in providers via env vars (ANTHROPIC_API_KEY, OPENAI_API_KEY, etc.)
+      supportsMcp: true,
+      supportsSkills: false,
+      supportsModelSelection: false,
+      supportedPlans: [], // Not applicable - uses built-in providers only
+      notes: 'Built-in providers only (Anthropic, OpenAI, Google, DeepSeek, Cerebras) via env vars. MCP (stdio) in ~/.mastracode/mcp.json.',
+    },
   };
 
   private readonly managerLoaders: Record<ToolName, () => Promise<ToolAdapter>> = {
@@ -152,6 +161,7 @@ export class ToolManager {
     amp: async () => (await import('./amp-manager.js')).ampManager as ToolAdapter,
     pi: async () => (await import('./pi-manager.js')).piManager as ToolAdapter,
     codex: async () => (await import('./codex-manager.js')).codexManager as ToolAdapter,
+    mastra: async () => (await import('./mastra-manager.js')).mastraManager as ToolAdapter,
   };
 
   constructor() {
@@ -273,6 +283,9 @@ export class ToolManager {
     const caps = this.getCapabilities(tool);
     if (!caps.supportsMcp) {
       throw new Error(`${tool} does not support MCP configuration`);
+    }
+    if (mcp.supportedPlans && mcp.supportedPlans.length > 0 && !mcp.supportedPlans.includes(plan as Plan)) {
+      throw new Error(`${mcp.name} is not supported for provider plan: ${plan}`);
     }
     const manager = await this.getManager(tool);
     await manager.installMCP(mcp, apiKey, plan);

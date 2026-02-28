@@ -28,7 +28,8 @@ export const BUILTIN_MCP_SERVICES: MCPService[] = [
       nvidia: { GITHUB_TOKEN: '' },
       lmstudio: { GITHUB_TOKEN: '' },
       alibaba: { GITHUB_TOKEN: '' },
-      alibaba_api: { GITHUB_TOKEN: '' }
+      alibaba_api: { GITHUB_TOKEN: '' },
+      zenmux: { GITHUB_TOKEN: '' },
     }
   },
   {
@@ -49,7 +50,8 @@ export const BUILTIN_MCP_SERVICES: MCPService[] = [
       nvidia: { COOLIFY_BASE_URL: '', COOLIFY_TOKEN: '' },
       lmstudio: { COOLIFY_BASE_URL: '', COOLIFY_TOKEN: '' },
       alibaba: { COOLIFY_BASE_URL: '', COOLIFY_TOKEN: '' },
-      alibaba_api: { COOLIFY_BASE_URL: '', COOLIFY_TOKEN: '' }
+      alibaba_api: { COOLIFY_BASE_URL: '', COOLIFY_TOKEN: '' },
+      zenmux: { COOLIFY_BASE_URL: '', COOLIFY_TOKEN: '' },
     }
   },
   // Z AI MCP Servers (GLM API)
@@ -57,6 +59,7 @@ export const BUILTIN_MCP_SERVICES: MCPService[] = [
     id: 'zai-mcp-server',
     name: 'Z AI MCP Server',
     description: 'Z AI unified MCP server with multiple tools',
+    supportedPlans: ['glm_coding_plan_global', 'glm_coding_plan_china'],
     protocol: 'stdio',
     command: 'npx',
     args: ['-y', '@z_ai/mcp-server'],
@@ -70,10 +73,18 @@ export const BUILTIN_MCP_SERVICES: MCPService[] = [
     id: 'web-search-prime',
     name: 'Web Search Prime',
     description: 'Z AI web search service',
+    supportedPlans: ['glm_coding_plan_global', 'glm_coding_plan_china'],
     protocol: 'streamable-http',
     urlTemplate: {
       glm_coding_plan_global: 'https://api.z.ai/api/mcp/web_search_prime/mcp',
-      glm_coding_plan_china: 'https://open.bigmodel.cn/api/mcp/web_search_prime/mcp'
+      glm_coding_plan_china: 'https://open.bigmodel.cn/api/mcp/web_search_prime/mcp',
+      kimi: 'https://api.z.ai/api/mcp/web_search_prime/mcp',
+      openrouter: 'https://api.z.ai/api/mcp/web_search_prime/mcp',
+      nvidia: 'https://api.z.ai/api/mcp/web_search_prime/mcp',
+      lmstudio: 'https://api.z.ai/api/mcp/web_search_prime/mcp',
+      alibaba: 'https://api.z.ai/api/mcp/web_search_prime/mcp',
+      alibaba_api: 'https://api.z.ai/api/mcp/web_search_prime/mcp',
+      zenmux: 'https://api.z.ai/api/mcp/web_search_prime/mcp'
     },
     requiresAuth: true
   },
@@ -81,10 +92,18 @@ export const BUILTIN_MCP_SERVICES: MCPService[] = [
     id: 'web-reader',
     name: 'Web Reader',
     description: 'Z AI web content reader service',
+    supportedPlans: ['glm_coding_plan_global', 'glm_coding_plan_china'],
     protocol: 'streamable-http',
     urlTemplate: {
       glm_coding_plan_global: 'https://api.z.ai/api/mcp/web_reader/mcp',
-      glm_coding_plan_china: 'https://open.bigmodel.cn/api/mcp/web_reader/mcp'
+      glm_coding_plan_china: 'https://open.bigmodel.cn/api/mcp/web_reader/mcp',
+      kimi: 'https://api.z.ai/api/mcp/web_reader/mcp',
+      openrouter: 'https://api.z.ai/api/mcp/web_reader/mcp',
+      nvidia: 'https://api.z.ai/api/mcp/web_reader/mcp',
+      lmstudio: 'https://api.z.ai/api/mcp/web_reader/mcp',
+      alibaba: 'https://api.z.ai/api/mcp/web_reader/mcp',
+      alibaba_api: 'https://api.z.ai/api/mcp/web_reader/mcp',
+      zenmux: 'https://api.z.ai/api/mcp/web_reader/mcp'
     },
     requiresAuth: true
   },
@@ -92,10 +111,18 @@ export const BUILTIN_MCP_SERVICES: MCPService[] = [
     id: 'zread',
     name: 'Z Read',
     description: 'Z AI reading assistant service',
+    supportedPlans: ['glm_coding_plan_global', 'glm_coding_plan_china'],
     protocol: 'streamable-http',
     urlTemplate: {
       glm_coding_plan_global: 'https://api.z.ai/api/mcp/zread/mcp',
-      glm_coding_plan_china: 'https://open.bigmodel.cn/api/mcp/zread/mcp'
+      glm_coding_plan_china: 'https://open.bigmodel.cn/api/mcp/zread/mcp',
+      kimi: 'https://api.z.ai/api/mcp/zread/mcp',
+      openrouter: 'https://api.z.ai/api/mcp/zread/mcp',
+      nvidia: 'https://api.z.ai/api/mcp/zread/mcp',
+      lmstudio: 'https://api.z.ai/api/mcp/zread/mcp',
+      alibaba: 'https://api.z.ai/api/mcp/zread/mcp',
+      alibaba_api: 'https://api.z.ai/api/mcp/zread/mcp',
+      zenmux: 'https://api.z.ai/api/mcp/zread/mcp'
     },
     requiresAuth: true
   }

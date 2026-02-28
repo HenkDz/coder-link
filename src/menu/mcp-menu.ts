@@ -52,13 +52,24 @@ export async function mcpMenu(tool: string): Promise<void> {
 
     try {
       if (action === 'install') {
+        const compatibleServices = BUILTIN_MCP_SERVICES.filter((s) => {
+          if (!s.supportedPlans || s.supportedPlans.length === 0) return true;
+          return s.supportedPlans.includes(auth.plan as any);
+        });
+
+        if (!compatibleServices.length) {
+          printWarning(`No built-in MCP services are compatible with ${planLabel(auth.plan)}.`);
+          await pause();
+          continue;
+        }
+
         const { id } = await inquirer.prompt<{ id: string | '__back' }>([
           {
             type: 'list',
             name: 'id',
             message: 'Select MCP:',
             choices: [
-              ...BUILTIN_MCP_SERVICES.map((s) => ({
+              ...compatibleServices.map((s) => ({
                 name: `${installed.includes(s.id) ? '✓' : ' '} ${s.name} (${s.id})`,
                 value: s.id,
               })),
@@ -70,6 +81,11 @@ export async function mcpMenu(tool: string): Promise<void> {
         if (id === '__back') continue;
 
         const service = BUILTIN_MCP_SERVICES.find((s) => s.id === id)!;
+        if (service.supportedPlans && service.supportedPlans.length > 0 && !service.supportedPlans.includes(auth.plan as any)) {
+          printWarning(`${service.name} is not compatible with ${planLabel(auth.plan)}.`);
+          await pause();
+          continue;
+        }
         if (service.requiresAuth && !auth.apiKey) {
           printWarning(`${service.name} requires a provider API key. Configure your provider first.`);
           await pause();
