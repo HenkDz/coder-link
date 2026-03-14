@@ -196,6 +196,8 @@ export function toolLabel(tool: string): string {
       return 'Crush';
     case 'factory-droid':
       return 'Factory Droid';
+    case 'ob1':
+      return 'OB1 CLI';
     case 'kimi':
       return 'Kimi (native)';
     case 'amp':

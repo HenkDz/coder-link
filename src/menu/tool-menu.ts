@@ -82,6 +82,13 @@ async function applyProviderToTool(tool: string, plan: Plan): Promise<boolean> {
     printInfo(`Select model for ${toolLabel(tool)} (default: ${defaultModel}):`);
     const model = await selectModelId(plan, defaultModel);
     if (model === '__back') return false;
+
+    // OB1 requires a model to be explicitly set
+    if (tool === 'ob1' && !model) {
+      printWarning('OB1 requires a model to be selected. Please select a model.');
+      await pause();
+      return false;
+    }
     modelOverride = model;
   }
 
@@ -148,6 +155,14 @@ export async function toolMenu(tool: string): Promise<void> {
     if (tool === 'factory-droid') {
       const factoryKey = configManager.getFactoryApiKey();
       console.log(`  ${chalk.gray('Factory API Key:')} ${factoryKey ? chalk.green(maskApiKey(factoryKey)) : chalk.yellow('Not set')}`);
+      console.log();
+    }
+
+    if (tool === 'ob1') {
+      const ob1Url = configManager.getOb1ApiUrl();
+      const ob1Key = configManager.getOb1ApiKey();
+      console.log(`  ${chalk.gray('OPENROUTER_API_URL:')} ${ob1Url ? chalk.green(ob1Url) : chalk.yellow('Not set')}`);
+      console.log(`  ${chalk.gray('OPENROUTER_API_KEY:')} ${ob1Key ? chalk.green(maskApiKey(ob1Key)) : chalk.yellow('Not set')}`);
       console.log();
     }
 
@@ -294,9 +309,18 @@ export async function toolMenu(tool: string): Promise<void> {
           await pause();
           continue;
         }
+
+        // OB1 requires a model to be specified
+        if (tool === 'ob1' && !globalModel) {
+          printWarning('OB1 requires a model to be configured in provider settings.');
+          printInfo('Please set a default model in Provider Setup first.');
+          await pause();
+          continue;
+        }
+
         const spinner = createSafeSpinner(`Applying ${planLabel(globalPlan!)} to ${toolLabel(tool)}...`).start();
         try {
-          await toolManager.loadConfig(tool, globalPlan!, globalKey!);
+          await toolManager.loadConfig(tool, globalPlan!, globalKey!, globalModel ? { model: globalModel } : undefined);
           spinner.succeed(`Now using ${planLabel(globalPlan!)}`);
         } catch (err) {
           spinner.fail('Failed to apply configuration');
@@ -423,13 +447,23 @@ async function launchTool(tool: string, mode?: 'same' | 'new'): Promise<void> {
       const applied = await applyProviderToTool(tool, selectedPlan);
       if (!applied) return;
     } else {
-      const spinner = createSafeSpinner(`Configuring with ${planLabel(globalPlan!)}...`).start();
-      try {
-        await toolManager.loadConfig(tool, globalPlan!, globalKey!);
-        spinner.succeed('Configuration applied');
-      } catch (err) {
-        spinner.fail('Failed to apply configuration');
-        throw err;
+      // OB1 requires a model to be specified
+      if (tool === 'ob1' && !globalModel) {
+        printWarning('OB1 requires a model to be configured in provider settings.');
+        printInfo('Using guided setup instead...');
+        const selectedPlan = await chooseToolProviderPlan(tool);
+        if (selectedPlan === '__back') return;
+        const applied = await applyProviderToTool(tool, selectedPlan);
+        if (!applied) return;
+      } else {
+        const spinner = createSafeSpinner(`Configuring with ${planLabel(globalPlan!)}...`).start();
+        try {
+          await toolManager.loadConfig(tool, globalPlan!, globalKey!, globalModel ? { model: globalModel } : undefined);
+          spinner.succeed('Configuration applied');
+        } catch (err) {
+          spinner.fail('Failed to apply configuration');
+          throw err;
+        }
       }
     }
   }
@@ -560,6 +594,60 @@ async function launchTool(tool: string, mode?: 'same' | 'new'): Promise<void> {
     }
 
     await runInteractiveWithEnv(start.cmd, start.args, { FACTORY_API_KEY: factoryKey });
+    return;
+  }
+
+  if (tool === 'ob1') {
+    let ob1ApiUrl = configManager.getOb1ApiUrl() || process.env.OPENROUTER_API_URL;
+    let ob1ApiKey = configManager.getOb1ApiKey() || process.env.OPENROUTER_API_KEY;
+
+    if (!ob1ApiUrl || !ob1ApiKey) {
+      printInfo('OB1 requires OPENROUTER_API_URL and OPENROUTER_API_KEY.');
+      if (!ob1ApiUrl) {
+        const { url } = await inquirer.prompt<{ url: string }>([
+          {
+            type: 'input',
+            name: 'url',
+            message: 'OPENROUTER_API_URL:',
+            default: 'https://api.z.ai/api/coding/paas/v4',
+          },
+        ]);
+        ob1ApiUrl = url?.trim() || '';
+      }
+      if (!ob1ApiKey) {
+        const { key } = await inquirer.prompt<{ key: string }>([
+          {
+            type: 'password',
+            name: 'key',
+            message: 'OPENROUTER_API_KEY:',
+            mask: '*',
+          },
+        ]);
+        ob1ApiKey = key?.trim() || '';
+      }
+
+      if (ob1ApiUrl || ob1ApiKey) {
+        const { save } = await inquirer.prompt<{ save: boolean }>([
+          { type: 'confirm', name: 'save', message: 'Save to coder-link config?', default: true },
+        ]);
+        if (save) configManager.setOb1Env(ob1ApiUrl, ob1ApiKey);
+      }
+    }
+
+    const ob1Env: Record<string, string> = {};
+    if (ob1ApiUrl) ob1Env.OPENROUTER_API_URL = ob1ApiUrl;
+    if (ob1ApiKey) ob1Env.OPENROUTER_API_KEY = ob1ApiKey;
+
+    if (launchMode === 'new') {
+      const ok = runInNewTerminal(start.cmd, start.args, ob1Env);
+      if (!ok) {
+        printWarning('Failed to open a new terminal window. Launching here instead.');
+        await runInteractiveWithEnv(start.cmd, start.args, ob1Env);
+      }
+      return;
+    }
+
+    await runInteractiveWithEnv(start.cmd, start.args, ob1Env);
     return;
   }
 

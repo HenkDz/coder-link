@@ -86,8 +86,19 @@ export async function mcpMenu(tool: string): Promise<void> {
           await pause();
           continue;
         }
-        if (service.requiresAuth && !auth.apiKey) {
-          printWarning(`${service.name} requires a provider API key. Configure your provider first.`);
+
+        // Resolve the API key: use authPlan-specific key if set, otherwise fall back to active provider
+        const effectivePlan = service.authPlan || auth.plan;
+        const effectiveApiKey = service.authPlan
+          ? configManager.getApiKeyFor(service.authPlan)
+          : auth.apiKey;
+
+        if (service.requiresAuth && !effectiveApiKey) {
+          printWarning(
+            service.authPlan
+              ? `${service.name} requires a ${planLabel(service.authPlan)} API key. Configure your GLM coding plan first.`
+              : `${service.name} requires a provider API key. Configure your provider first.`
+          );
           await pause();
           continue;
         }
@@ -114,7 +125,7 @@ export async function mcpMenu(tool: string): Promise<void> {
           let success = 0;
           for (const t of mcpCapableTools) {
             try {
-              await toolManager.installMCP(t, service, auth.apiKey || '', auth.plan);
+              await toolManager.installMCP(t, service, effectiveApiKey || '', effectivePlan || '');
               success++;
             } catch {
               // skip individual failures, summarize total below
@@ -125,7 +136,7 @@ export async function mcpMenu(tool: string): Promise<void> {
             printInfo('Some tools skipped due to compatibility or tool-specific constraints.');
           }
         } else {
-          await toolManager.installMCP(tool, service, auth.apiKey || '', auth.plan);
+          await toolManager.installMCP(tool, service, effectiveApiKey || '', effectivePlan || '');
           printSuccess(`Installed ${id} to ${toolLabel(tool)}`);
         }
         await pause();

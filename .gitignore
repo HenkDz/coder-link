@@ -32,3 +32,5 @@ __pycache__/
 
 # Misc
 *.tsbuildinfo.npmrc
+.ob1
+scripts-and-docs

@@ -9,7 +9,7 @@ import { printSplash, printStatusBar, printNavigationHints, printConfigPathHint 
 import { printError, printSuccess, printInfo } from '../utils/output.js';
 import { providerMenu } from './provider-menu.js';
 import { toolSelectMenu } from './tool-menu.js';
-import { skillsMenu } from './skills-menu.js';
+import { skillsMenu, globalMcpMenu } from './skills-menu.js';
 import { diagnosticsMenu, logsMenu } from './system-menu.js';
 import { initMenuTerminalGuards, providerSummary, pause } from './shared.js';
 
@@ -38,10 +38,11 @@ export async function runMenu(): Promise<void> {
       { name: '1) ⚡ Provider Setup', value: 'provider' },
       { name: '2) 🛠 Coding Tools', value: 'tools' },
       { name: '3) � Agent Skills', value: 'skills' },
-      { name: '4) 🌐 Language', value: 'lang' },
+      { name: '4) 🔌 MCP Servers', value: 'mcp' },
+      { name: '5) 🌐 Language', value: 'lang' },
       new inquirer.Separator(),
-      { name: '5) 🔬 System Diagnostics', value: 'doctor' },
-      { name: '6) 📋 View Logs', value: 'logs' },
+      { name: '6) 🔬 System Diagnostics', value: 'doctor' },
+      { name: '7) 📋 View Logs', value: 'logs' },
       new inquirer.Separator(),
       { name: chalk.gray('Exit'), value: 'exit' },
     ];
@@ -67,6 +68,8 @@ export async function runMenu(): Promise<void> {
         await toolSelectMenu();
       } else if (op === 'skills') {
         await skillsMenu();
+      } else if (op === 'mcp') {
+        await globalMcpMenu();
       } else if (op === 'doctor') {
         await diagnosticsMenu();
       } else if (op === 'logs') {

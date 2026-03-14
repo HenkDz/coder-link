@@ -59,11 +59,11 @@ export const BUILTIN_MCP_SERVICES: MCPService[] = [
     id: 'zai-mcp-server',
     name: 'Z AI MCP Server',
     description: 'Z AI unified MCP server with multiple tools',
-    supportedPlans: ['glm_coding_plan_global', 'glm_coding_plan_china'],
     protocol: 'stdio',
     command: 'npx',
     args: ['-y', '@z_ai/mcp-server'],
     requiresAuth: true,
+    authPlan: 'glm_coding_plan_global',
     envTemplate: {
       glm_coding_plan_global: { Z_AI_MODE: 'ZAI', Z_AI_API_KEY: '' },
       glm_coding_plan_china: { Z_AI_MODE: 'ZAI', Z_AI_API_KEY: '' }
@@ -73,8 +73,9 @@ export const BUILTIN_MCP_SERVICES: MCPService[] = [
     id: 'web-search-prime',
     name: 'Web Search Prime',
     description: 'Z AI web search service',
-    supportedPlans: ['glm_coding_plan_global', 'glm_coding_plan_china'],
     protocol: 'streamable-http',
+    authPlan: 'glm_coding_plan_global',
+    authScheme: 'raw',
     urlTemplate: {
       glm_coding_plan_global: 'https://api.z.ai/api/mcp/web_search_prime/mcp',
       glm_coding_plan_china: 'https://open.bigmodel.cn/api/mcp/web_search_prime/mcp',
@@ -92,8 +93,8 @@ export const BUILTIN_MCP_SERVICES: MCPService[] = [
     id: 'web-reader',
     name: 'Web Reader',
     description: 'Z AI web content reader service',
-    supportedPlans: ['glm_coding_plan_global', 'glm_coding_plan_china'],
     protocol: 'streamable-http',
+    authPlan: 'glm_coding_plan_global',
     urlTemplate: {
       glm_coding_plan_global: 'https://api.z.ai/api/mcp/web_reader/mcp',
       glm_coding_plan_china: 'https://open.bigmodel.cn/api/mcp/web_reader/mcp',
@@ -111,8 +112,8 @@ export const BUILTIN_MCP_SERVICES: MCPService[] = [
     id: 'zread',
     name: 'Z Read',
     description: 'Z AI reading assistant service',
-    supportedPlans: ['glm_coding_plan_global', 'glm_coding_plan_china'],
     protocol: 'streamable-http',
+    authPlan: 'glm_coding_plan_global',
     urlTemplate: {
       glm_coding_plan_global: 'https://api.z.ai/api/mcp/zread/mcp',
       glm_coding_plan_china: 'https://open.bigmodel.cn/api/mcp/zread/mcp',

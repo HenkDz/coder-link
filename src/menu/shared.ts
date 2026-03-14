@@ -79,6 +79,8 @@ export function startCommand(tool: string): { cmd: string; args: string[] } {
       return { cmd: 'codex', args: [] };
     case 'mastra':
       return { cmd: 'mastracode', args: [] };
+    case 'ob1':
+      return { cmd: 'ob1', args: [] };
     default:
       return { cmd: tool, args: [] };
   }
@@ -110,6 +112,8 @@ export function installHint(tool: string): { label: string; command?: string } {
       return { label: 'Install Codex CLI', command: 'npm install -g @openai/codex' };
     case 'mastra':
       return { label: 'Install Mastra Code', command: 'npm install -g mastracode' };
+    case 'ob1':
+      return { label: 'Install OB1 CLI', command: 'npm install -g @obl-hq/ob1' };
     default:
       return { label: 'Install instructions', command: undefined };
   }

@@ -5,13 +5,14 @@ import { join } from 'path';
 
 import { configManager } from '../utils/config.js';
 import { logger } from '../utils/logger.js';
-import { toolManager, type ToolName } from '../lib/tool-manager.js';
-import { 
-  SkillsManager, 
-  type Skill, 
-  type SkillFrontmatter, 
-  type ToolWithSkills 
+import { toolManager, type ToolName, type MCPService } from '../lib/tool-manager.js';
+import {
+  SkillsManager,
+  type Skill,
+  type SkillFrontmatter,
+  type ToolWithSkills
 } from '../lib/skills-manager.js';
+import { BUILTIN_MCP_SERVICES } from '../mcp-services.js';
 
 // Re-export ToolWithSkills for use in other modules
 export type { ToolWithSkills } from '../lib/skills-manager.js';
@@ -28,6 +29,9 @@ import { createSafeSpinner, pause } from './shared.js';
 
 // Tools that support skills
 const SKILLS_CAPABLE_TOOLS: ToolWithSkills[] = ['claude-code', 'opencode'];
+
+// Tools that support MCP
+const MCP_CAPABLE_TOOLS: ToolName[] = ['claude-code', 'opencode', 'crush', 'factory-droid', 'kimi', 'ob1', 'mastra'];
 
 function getSkillsManager(tool: ToolWithSkills): SkillsManager {
   return SkillsManager.getInstance(tool);
@@ -52,12 +56,13 @@ export async function skillsMenu(): Promise<void> {
 
     const choices: Array<{ name: string; value: string } | inquirer.Separator> = [];
 
+    // Skills-capable tools
     for (const tool of SKILLS_CAPABLE_TOOLS) {
       const manager = getSkillsManager(tool);
       const skills = manager.listSkills();
       const personalCount = skills.filter(s => s.location === 'personal').length;
       const projectCount = skills.filter(s => s.location === 'project').length;
-      
+
       const countStr = personalCount + projectCount > 0
         ? chalk.green(` (${personalCount} personal, ${projectCount} project)`)
         : chalk.gray(' (no skills)');
@@ -178,6 +183,270 @@ export async function toolSkillsMenu(tool: ToolWithSkills): Promise<void> {
     } catch (error) {
       logger.logError('skillsMenu', error);
       printError(error instanceof Error ? error.message : String(error));
+      await pause();
+    }
+  }
+}
+
+/**
+ * Global MCP menu - manage MCP servers across all tools
+ * Exported for use in main-menu.ts
+ */
+export async function globalMcpMenu(): Promise<void> {
+  const auth = configManager.getAuth();
+
+  if (!auth.plan) {
+    printWarning('Select a default provider first from Provider Setup.');
+    await pause();
+    return;
+  }
+
+  while (true) {
+    console.clear();
+    printHeader('MCP Servers');
+
+    // Get MCP-capable tools
+    const mcpCapableTools = MCP_CAPABLE_TOOLS.filter(t => configManager.getEnabledTools().includes(t));
+
+    // Get installation status across all tools
+    const mcpStatus: Map<string, { installed: Set<string>; tools: string[] }> = new Map();
+    for (const mcp of BUILTIN_MCP_SERVICES) {
+      const installed = new Set<string>();
+      const toolsWithMcp: string[] = [];
+      for (const tool of mcpCapableTools) {
+        const isInstalled = await toolManager.isMCPInstalled(tool, mcp.id);
+        if (isInstalled) {
+          installed.add(tool);
+          toolsWithMcp.push(toolLabel(tool));
+        }
+      }
+      mcpStatus.set(mcp.id, { installed, tools: toolsWithMcp });
+    }
+
+    // Count total installations
+    let totalInstalled = 0;
+    for (const [, status] of Array.from(mcpStatus)) {
+      totalInstalled += status.tools.length;
+    }
+
+    console.log(`  ${chalk.gray('Provider:')} ${planLabel(auth.plan)}`);
+    console.log(`  ${chalk.gray('MCP-capable tools:')} ${mcpCapableTools.map(t => toolLabel(t)).join(', ')}`);
+    console.log(`  ${chalk.gray('Total installed:')} ${totalInstalled > 0 ? chalk.green(totalInstalled) : chalk.yellow('None')}`);
+    console.log();
+    printNavigationHints();
+
+    const { action } = await inquirer.prompt<{ action: 'install' | 'uninstall' | 'install-all' | '__back' }>([
+      {
+        type: 'list',
+        name: 'action',
+        message: 'Action:',
+        choices: [
+          { name: '📦 Install MCP to All Tools', value: 'install-all' },
+          { name: '🔧 Install to Specific Tools', value: 'install' },
+          { name: '🗑 Uninstall MCP', value: 'uninstall' as const },
+          new inquirer.Separator(),
+          { name: chalk.gray('← Back'), value: '__back' as const },
+        ],
+      },
+    ]);
+
+    if (action === '__back') return;
+
+    try {
+      if (action === 'install-all' || action === 'install') {
+        // Filter compatible services
+        const compatibleServices = BUILTIN_MCP_SERVICES.filter((s) => {
+          if (!s.supportedPlans || s.supportedPlans.length === 0) return true;
+          return s.supportedPlans.includes(auth.plan as any);
+        });
+
+        if (!compatibleServices.length) {
+          printWarning(`No built-in MCP services are compatible with ${planLabel(auth.plan)}.`);
+          await pause();
+          continue;
+        }
+
+        // Show current status
+        console.log();
+        console.log(chalk.cyan('  MCP Status:'));
+        for (const service of compatibleServices) {
+          const status = mcpStatus.get(service.id)!;
+          const statusStr = status.tools.length > 0
+            ? chalk.green(`✓ ${status.tools.length} tools`)
+            : chalk.gray('— not installed');
+          console.log(`    ${status.tools.length > 0 ? '✓' : ' '} ${service.name}${chalk.gray(` (${service.id})`)}: ${statusStr}`);
+        }
+        console.log();
+
+        const { id } = await inquirer.prompt<{ id: string | '__back' }>([
+          {
+            type: 'list',
+            name: 'id',
+            message: 'Select MCP:',
+            choices: [
+              ...compatibleServices.map((s) => ({
+                name: `${s.name} (${s.id})`,
+                value: s.id,
+              })),
+              new inquirer.Separator(),
+              { name: chalk.gray('← Back'), value: '__back' as const },
+            ],
+          },
+        ]);
+        if (id === '__back') continue;
+
+        const service = BUILTIN_MCP_SERVICES.find((s) => s.id === id)!;
+
+        // Resolve the API key
+        const effectivePlan = service.authPlan || auth.plan;
+        const effectiveApiKey = service.authPlan
+          ? configManager.getApiKeyFor(service.authPlan)
+          : auth.apiKey;
+
+        if (service.requiresAuth && !effectiveApiKey) {
+          printWarning(
+            service.authPlan
+              ? `${service.name} requires a ${planLabel(service.authPlan)} API key. Configure your GLM coding plan first.`
+              : `${service.name} requires a provider API key. Configure your provider first.`
+          );
+          await pause();
+          continue;
+        }
+
+        // Find compatible tools for this MCP
+        const compatibleTools = mcpCapableTools.filter(t => {
+          if (!service.supportedPlans || service.supportedPlans.length === 0) return true;
+          // Check if the tool supports this plan
+          const caps = toolManager.getCapabilities(t);
+          return service.supportedPlans.some(p => caps.supportedPlans.includes(p as any));
+        });
+
+        // Filter tools that don't already have this MCP
+        const toolsNeedingInstall = compatibleTools.filter(t => {
+          const status = mcpStatus.get(service.id)!;
+          return !status.installed.has(t);
+        });
+
+        if (action === 'install-all') {
+          // Install to all compatible tools
+          const spinner = createSafeSpinner(`Installing ${id} to all compatible tools...`).start();
+          let success = 0;
+          for (const t of compatibleTools) {
+            try {
+              await toolManager.installMCP(t, service, effectiveApiKey || '', effectivePlan || '');
+              success++;
+            } catch {
+              // skip individual failures
+            }
+          }
+          spinner.succeed(`Installed ${id} to ${success}/${compatibleTools.length} tools`);
+          if (success < compatibleTools.length) {
+            printInfo('Some tools may have been skipped due to compatibility issues.');
+          }
+          await pause();
+        } else {
+          // Install to specific tools
+          const { targets } = await inquirer.prompt<{ targets: string[] }>([
+            {
+              type: 'checkbox',
+              name: 'targets',
+              message: 'Select tools to install to:',
+              choices: [
+                ...compatibleTools.map(t => ({
+                  name: `${toolLabel(t)}${mcpStatus.get(service.id)!.installed.has(t) ? ' ✓' : ''}`,
+                  value: t,
+                  checked: !mcpStatus.get(service.id)!.installed.has(t), // Default to unchecked if already installed
+                })),
+              ],
+              validate: (input: string[]) => {
+                return input.length > 0 || 'Select at least one tool';
+              },
+            },
+          ]);
+
+          const spinner = createSafeSpinner(`Installing ${id}...`).start();
+          let success = 0;
+          for (const t of targets) {
+            try {
+              await toolManager.installMCP(t, service, effectiveApiKey || '', effectivePlan || '');
+              success++;
+            } catch {
+              // skip individual failures
+            }
+          }
+          spinner.succeed(`Installed ${id} to ${success}/${targets.length} tools`);
+          await pause();
+        }
+      } else if (action === 'uninstall') {
+        // Find MCPs that are installed in at least one tool
+        const installedMcps: Array<{ id: string; name: string; tools: string[] }> = [];
+        for (const [id, status] of Array.from(mcpStatus)) {
+          if (status.tools.length > 0) {
+            const service = BUILTIN_MCP_SERVICES.find(s => s.id === id);
+            installedMcps.push({
+              id,
+              name: service?.name || id,
+              tools: status.tools,
+            });
+          }
+        }
+
+        if (installedMcps.length === 0) {
+          printWarning('No MCPs are currently installed.');
+          await pause();
+          continue;
+        }
+
+        const { id, targets } = await inquirer.prompt<{ id: string; targets: string[] }>([
+          {
+            type: 'list',
+            name: 'id',
+            message: 'Select MCP to uninstall:',
+            choices: [
+              ...installedMcps.map(x => ({
+                name: `${x.name} (${x.tools.length} tools)`,
+                value: x.id,
+              })),
+              new inquirer.Separator(),
+              { name: chalk.gray('← Back'), value: '__back' as const },
+            ],
+          },
+          {
+            type: 'checkbox',
+            name: 'targets',
+            message: 'Select tools to uninstall from:',
+            choices: (answers: { id: string }) => {
+              const status = mcpStatus.get(answers.id)!;
+              return status.tools.map(t => ({
+                name: toolLabel(t),
+                value: t,
+                checked: true, // Default all to checked
+              }));
+            },
+            validate: (input: string[]) => {
+              return input.length > 0 || 'Select at least one tool';
+            },
+          },
+        ]);
+
+        if (id === '__back') continue;
+
+        const spinner = createSafeSpinner(`Uninstalling ${id}...`).start();
+        let success = 0;
+        for (const t of targets) {
+          try {
+            await toolManager.uninstallMCP(t, id);
+            success++;
+          } catch {
+            // skip individual failures
+          }
+        }
+        spinner.succeed(`Uninstalled ${id} from ${success}/${targets.length} tools`);
+        await pause();
+      }
+    } catch (error) {
+      logger.logError('globalMcpMenu', error);
+      printError(error instanceof Error ? error.message : String(error), 'Check tool-specific documentation for MCP requirements');
       await pause();
     }
   }

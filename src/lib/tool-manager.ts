@@ -26,6 +26,8 @@ export interface MCPService {
   authEnvVar?: string;
   authHeader?: string;
   authScheme?: 'Bearer' | 'raw';
+  /** When set, this plan's API key is used for auth regardless of the active provider. */
+  authPlan?: Plan;
 }
 
 export interface ProviderOptions {
@@ -38,9 +40,9 @@ export interface ProviderOptions {
   maxContextSize?: number;
 }
 
-export type ToolName = 'claude-code' | 'opencode' | 'crush' | 'factory-droid' | 'kimi' | 'amp' | 'pi' | 'codex' | 'mastra';
+export type ToolName = 'claude-code' | 'opencode' | 'crush' | 'factory-droid' | 'kimi' | 'amp' | 'pi' | 'codex' | 'mastra' | 'ob1';
 
-const TOOL_NAMES: ToolName[] = ['claude-code', 'opencode', 'crush', 'factory-droid', 'kimi', 'amp', 'pi', 'codex', 'mastra'];
+const TOOL_NAMES: ToolName[] = ['claude-code', 'opencode', 'crush', 'factory-droid', 'kimi', 'amp', 'pi', 'codex', 'mastra', 'ob1'];
 
 const ALL_PLANS: Plan[] = [
   'glm_coding_plan_global',
@@ -150,6 +152,14 @@ export class ToolManager {
       supportedPlans: [], // Not applicable - uses built-in providers only
       notes: 'Built-in providers only (Anthropic, OpenAI, Google, DeepSeek, Cerebras) via env vars. MCP (stdio) in ~/.mastracode/mcp.json.',
     },
+    ob1: {
+      supportsProviderConfig: true,
+      supportsMcp: true,
+      supportsSkills: false,
+      supportsModelSelection: true,
+      supportedPlans: ['glm_coding_plan_global', 'glm_coding_plan_china', 'openrouter', 'lmstudio', 'alibaba', 'alibaba_api', 'zenmux'],
+      notes: 'Uses env vars OPENROUTER_API_URL and OPENROUTER_API_KEY at launch time. Config in ~/.ob1/settings.json.',
+    },
   };
 
   private readonly managerLoaders: Record<ToolName, () => Promise<ToolAdapter>> = {
@@ -162,6 +172,7 @@ export class ToolManager {
     pi: async () => (await import('./pi-manager.js')).piManager as ToolAdapter,
     codex: async () => (await import('./codex-manager.js')).codexManager as ToolAdapter,
     mastra: async () => (await import('./mastra-manager.js')).mastraManager as ToolAdapter,
+    ob1: async () => (await import('./ob1-manager.js')).ob1Manager as ToolAdapter,
   };
 
   constructor() {
@@ -284,7 +295,9 @@ export class ToolManager {
     if (!caps.supportsMcp) {
       throw new Error(`${tool} does not support MCP configuration`);
     }
-    if (mcp.supportedPlans && mcp.supportedPlans.length > 0 && !mcp.supportedPlans.includes(plan as Plan)) {
+    // MCPs with authPlan are available on any provider (they use their own plan's key)
+    // MCPs with explicit supportedPlans are restricted to those plans only
+    if (!mcp.authPlan && mcp.supportedPlans && mcp.supportedPlans.length > 0 && !mcp.supportedPlans.includes(plan as Plan)) {
       throw new Error(`${mcp.name} is not supported for provider plan: ${plan}`);
     }
     const manager = await this.getManager(tool);

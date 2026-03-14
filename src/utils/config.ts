@@ -27,7 +27,8 @@ export type ToolId =
   | 'amp'
   | 'pi'
   | 'codex'
-  | 'mastra';
+  | 'mastra'
+  | 'ob1';
 
 export const ALL_PROVIDER_PLANS: Plan[] = [
   'glm_coding_plan_global',
@@ -51,6 +52,7 @@ export const ALL_TOOL_IDS: ToolId[] = [
   'pi',
   'codex',
   'mastra',
+  'ob1',
 ];
 
 export const KIMI_LIKE_PLANS: ReadonlySet<string> = new Set([
@@ -94,6 +96,10 @@ export interface Config {
   tools?: {
     factory_droid?: {
       factory_api_key?: string;
+    };
+    ob1?: {
+      openrouter_api_url?: string;
+      openrouter_api_key?: string;
     };
   };
 
@@ -733,6 +739,47 @@ export class ConfigManager {
       delete this.config.tools.factory_droid.factory_api_key;
     } else {
       this.config.tools.factory_droid.factory_api_key = trimmed;
+    }
+
+    this.save();
+  }
+
+  getOb1ApiUrl(): string | undefined {
+    const url = this.config.tools?.ob1?.openrouter_api_url;
+    if (typeof url !== 'string') return undefined;
+    const trimmed = url.trim();
+    return trimmed || undefined;
+  }
+
+  getOb1ApiKey(): string | undefined {
+    const key = this.config.tools?.ob1?.openrouter_api_key;
+    if (typeof key !== 'string') return undefined;
+    const trimmed = key.trim();
+    return trimmed ? trimmed : undefined;
+  }
+
+  setOb1Env(apiUrl?: string, apiKey?: string): void {
+    const trimmedUrl = typeof apiUrl === 'string' ? apiUrl.trim() : '';
+    const trimmedKey = typeof apiKey === 'string' ? apiKey.trim() : '';
+
+    this.config.tools = this.config.tools && typeof this.config.tools === 'object' ? this.config.tools : {};
+    this.config.tools.ob1 = this.config.tools.ob1 && typeof this.config.tools.ob1 === 'object' ? this.config.tools.ob1 : {};
+
+    if (!trimmedUrl) {
+      delete this.config.tools.ob1.openrouter_api_url;
+    } else {
+      this.config.tools.ob1.openrouter_api_url = trimmedUrl;
+    }
+
+    if (!trimmedKey) {
+      delete this.config.tools.ob1.openrouter_api_key;
+    } else {
+      this.config.tools.ob1.openrouter_api_key = trimmedKey;
+    }
+
+    // Clean up empty container
+    if (Object.keys(this.config.tools.ob1).length === 0) {
+      delete this.config.tools.ob1;
     }
 
     this.save();

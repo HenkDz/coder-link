@@ -341,8 +341,6 @@ export function resolveProviderBaseUrl(
   protocol: Protocol,
   options?: { baseUrl?: string; anthropicBaseUrl?: string }
 ): string {
-  const config = PROVIDER_CONFIGS[plan];
-  
   // Priority: protocol-specific override > generic override > default
   if (protocol === 'anthropic' && options?.anthropicBaseUrl?.trim()) {
     return normalizeProviderUrl(options.anthropicBaseUrl.trim(), plan, protocol);
@@ -479,14 +477,6 @@ export function resolveBaseUrl(
 }
 
 /**
- * Normalize a user-provided URL based on provider-specific rules (protocol-agnostic)
- * @deprecated Internal function, use resolveProviderBaseUrl instead
- */
-function normalizeUrl(url: string, plan: Plan, protocol: Protocol): string {
-  return normalizeProviderUrl(url, plan, protocol);
-}
-
-/**
  * Normalize LM Studio URL for a specific protocol (protocol-agnostic)
  * This is a dedicated function to handle LM Studio's URL conventions.
  */
@@ -544,8 +534,29 @@ export function supportsThinking(plan: Plan, source?: string): boolean {
 }
 
 // ============================================================================
-// LM Studio Detection & Health Check (Recommendation #1)
+// LM Studio Detection & Health Check (Enhanced with Robustness Features)
 // ============================================================================
+
+/**
+ * Error types for LM Studio connection issues
+ */
+export enum LMStudioErrorType {
+  CONNECTION_REFUSED = 'connection-refused',
+  TIMEOUT = 'timeout',
+  DNS_FAILURE = 'dns-failure',
+  HTTP_ERROR = 'http-error',
+  UNKNOWN = 'unknown',
+}
+
+/**
+ * Detailed health check error information
+ */
+export interface LMStudioHealthError {
+  type: LMStudioErrorType;
+  message: string;
+  statusCode?: number;
+  details?: string;
+}
 
 /**
  * Response from LM Studio /v1/models endpoint
@@ -560,8 +571,30 @@ interface LMStudioModelsResponse {
   data: LMStudioModel[];
 }
 
+/**
+ * Enhanced health check result with detailed diagnostics
+ */
+export interface LMStudioHealthResult {
+  reachable: boolean;
+  url?: string;
+  version?: string;
+  /** Port that responded successfully */
+  port?: number;
+  /** Error details if unreachable */
+  error?: LMStudioHealthError;
+  /** Number of attempts made */
+  attempts: number;
+  /** Whether model was successfully tested */
+  modelTested: boolean;
+  /** Model ID if available */
+  modelId?: string;
+}
+
 /** Default health check timeout in milliseconds */
 const LM_STUDIO_HEALTH_TIMEOUT = 3000;
+
+/** Default max retries for health check */
+const LM_STUDIO_MAX_RETRIES = 3;
 
 /**
  * Get default ports for LM Studio from configuration
@@ -569,6 +602,76 @@ const LM_STUDIO_HEALTH_TIMEOUT = 3000;
 function getLMStudioConfiguredPorts(): number[] {
   const config = PROVIDER_CONFIGS.lmstudio;
   return config.configurableDefaults?.defaultPorts || [1234, 1235, 8766];
+}
+
+/**
+ * Classify network errors for better diagnostics
+ */
+function classifyLMStudioError(error: unknown): LMStudioHealthError {
+  if (error instanceof Error) {
+    const message = error.message.toLowerCase();
+    
+    // Connection refused - server not running
+    if (message.includes('econnrefused') || message.includes('connection refused')) {
+      return {
+        type: LMStudioErrorType.CONNECTION_REFUSED,
+        message: 'Connection refused - LM Studio may not be running',
+        details: error.message,
+      };
+    }
+    
+    // Timeout - server running but slow/unresponsive
+    if (message.includes('etimedout') || message.includes('timeout') || error.name === 'AbortError') {
+      return {
+        type: LMStudioErrorType.TIMEOUT,
+        message: 'Connection timed out - server is slow or overloaded',
+        details: error.message,
+      };
+    }
+    
+    // DNS failure - invalid hostname
+    if (message.includes('enotfound') || message.includes('dns')) {
+      return {
+        type: LMStudioErrorType.DNS_FAILURE,
+        message: 'DNS resolution failed - check host name',
+        details: error.message,
+      };
+    }
+    
+    // HTTP error with status code (fetch throws Response-like error)
+    const errorWithStatus = error as { status?: number };
+    if (typeof errorWithStatus.status === 'number') {
+      return {
+        type: LMStudioErrorType.HTTP_ERROR,
+        message: `HTTP error ${errorWithStatus.status}`,
+        statusCode: errorWithStatus.status,
+        details: error.message,
+      };
+    }
+    
+    // Network/unknown errors
+    if (message.includes('network') || message.includes('failed')) {
+      return {
+        type: LMStudioErrorType.UNKNOWN,
+        message: 'Network error occurred',
+        details: error.message,
+      };
+    }
+  }
+  
+  return {
+    type: LMStudioErrorType.UNKNOWN,
+    message: 'Unknown error occurred',
+    details: error instanceof Error ? error.message : String(error),
+  };
+}
+
+/**
+ * Extract port from URL string
+ */
+function extractPort(url: string): number | undefined {
+  const match = url.match(/:(\d+)/);
+  return match ? parseInt(match[1], 10) : undefined;
 }
 
 /**
@@ -601,53 +704,217 @@ interface LMStudioHealthResponse {
 }
 
 /**
- * Check if LM Studio server is reachable
- * Returns the actual base URL that responded, or null if unreachable
+ * Test chat completions endpoint to verify API is working
+ */
+async function testChatCompletionsEndpoint(
+  baseUrl: string,
+  timeoutMs: number,
+  signal?: AbortSignal
+): Promise<{ success: boolean; error?: LMStudioHealthError }> {
+  const chatUrl = `${buildModelsUrl(baseUrl).replace('/models', '')}/chat/completions`;
+  
+  try {
+    const controller = signal ? null : new AbortController();
+    const timeoutId = controller ? setTimeout(() => controller.abort(), timeoutMs) : undefined;
+    
+    const response = await fetch(chatUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer lmstudio', // LM Studio accepts any key
+      },
+      body: JSON.stringify({
+        model: 'test',
+        messages: [{ role: 'user', content: 'test' }],
+        max_tokens: 10,
+      }),
+      signal: signal ?? controller?.signal,
+    });
+    
+    if (timeoutId) clearTimeout(timeoutId);
+    
+    // 200, 400, 401, 404 are all acceptable - means endpoint exists
+    if (response.status >= 200 && response.status < 500) {
+      return { success: true };
+    }
+    
+    return { 
+      success: false,
+      error: {
+        type: LMStudioErrorType.HTTP_ERROR,
+        message: `Unexpected status code: ${response.status}`,
+        statusCode: response.status,
+      }
+    };
+    
+  } catch (error) {
+    return {
+      success: false,
+      error: classifyLMStudioError(error),
+    };
+  }
+}
+
+/**
+ * Check if LM Studio server is reachable with retry logic and error classification
+ * Returns detailed health result with diagnostics
  */
 export async function checkLMStudioHealth(
   baseUrl?: string,
-  options?: { timeoutMs?: number; signal?: AbortSignal }
-): Promise<{ reachable: boolean; url?: string; version?: string }> {
+  options?: { 
+    timeoutMs?: number; 
+    signal?: AbortSignal;
+    maxRetries?: number;
+    testChatEndpoint?: boolean;
+  }
+): Promise<LMStudioHealthResult> {
   const timeout = options?.timeoutMs ?? LM_STUDIO_HEALTH_TIMEOUT;
+  const maxRetries = options?.maxRetries ?? LM_STUDIO_MAX_RETRIES;
+  const testChatEndpoint = options?.testChatEndpoint ?? false;
+  
   const defaultPorts = getLMStudioConfiguredPorts();
-
+  
   // If specific URL provided, try only that
   const urlsToTry = baseUrl
-    ? [baseUrl.replace(/\/+$/, '')]
-    : defaultPorts.map(port => `http://localhost:${port}`);
+    ? [{ url: baseUrl.replace(/\/+$/, ''), port: extractPort(baseUrl) }]
+    : defaultPorts.map(port => ({ url: `http://localhost:${port}`, port }));
+  
+  let lastError: LMStudioHealthError | undefined;
+  let attempts = 0;
+  let lastSuccessfulUrl: string | undefined;
+  let lastSuccessfulPort: number | undefined;
+  
+  for (const { url, port } of urlsToTry) {
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      attempts++;
+      
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeout);
+        
+        // Try health endpoint first (root)
+        const healthUrl = buildHealthUrl(url);
+        const response = await fetch(healthUrl, {
+          method: 'GET',
+          signal: options?.signal ?? controller.signal,
+        });
+        
+        clearTimeout(timeoutId);
+        
+        // Check if we got a valid response
+        if (response.ok || response.status === 200) {
+          // Try to parse version info if available
+          let version: string | undefined;
+          try {
+            const data: LMStudioHealthResponse = await response.json();
+            version = data.version;
+          } catch {
+            // Health endpoint might return plain text or no body
+          }
+          
+          // Optionally test chat completions endpoint
+          let modelId: string | undefined;
+          let modelTested = false;
+          
+          if (testChatEndpoint) {
+            const chatTest = await testChatCompletionsEndpoint(url, timeout, controller.signal);
+            if (chatTest.success) {
+              modelTested = true;
+              // Try to fetch actual model
+              const fetchedModel = await fetchLMStudioModel(url, { timeoutMs: timeout });
+              modelId = fetchedModel ?? undefined;
+            } else {
+              lastError = chatTest.error;
+            }
+          } else {
+            modelTested = true;
+            const fetchedModel = await fetchLMStudioModel(url, { timeoutMs: timeout });
+            modelId = fetchedModel ?? undefined;
+          }
+          
+          return {
+            reachable: true,
+            url,
+            port,
+            version,
+            modelTested,
+            modelId,
+            attempts,
+          };
+        } else {
+          lastError = {
+            type: LMStudioErrorType.HTTP_ERROR,
+            message: `HTTP ${response.status}`,
+            statusCode: response.status,
+          };
+        }
+        
+      } catch (error) {
+        lastError = classifyLMStudioError(error);
+        
+        // Retry with exponential backoff (except on last attempt)
+        if (attempt < maxRetries - 1) {
+          const backoffMs = Math.pow(2, attempt) * 500;
+          await new Promise(resolve => setTimeout(resolve, backoffMs));
+          continue;
+        }
+      }
+    }
+    
+    lastSuccessfulUrl = url;
+    lastSuccessfulPort = port;
+  }
+  
+  // All attempts failed
+  return {
+    reachable: false,
+    url: lastSuccessfulUrl,
+    port: lastSuccessfulPort,
+    error: lastError,
+    attempts,
+    modelTested: false,
+  };
+}
 
-  for (const url of urlsToTry) {
+/**
+ * Scan localhost for LM Studio across common ports
+ * Returns first port that responds, or null if none found
+ */
+export async function scanForLMStudio(
+  options?: { 
+    timeoutMs?: number; 
+    signal?: AbortSignal;
+    additionalPorts?: number[];
+  }
+): Promise<number | null> {
+  const timeout = options?.timeoutMs ?? 1000;
+  const basePorts = getLMStudioConfiguredPorts();
+  const customPorts = options?.additionalPorts || [];
+  const portsToScan = [...basePorts, ...customPorts];
+  
+  for (const port of portsToScan) {
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), timeout);
-
-      // Try health endpoint first (root), fallback to models endpoint
-      const healthUrl = buildHealthUrl(url);
-      const response = await fetch(healthUrl, {
+      
+      const url = `http://localhost:${port}`;
+      const response = await fetch(url, {
         method: 'GET',
         signal: options?.signal ?? controller.signal,
       });
-
+      
       clearTimeout(timeoutId);
-
+      
       if (response.ok || response.status === 200) {
-        // Try to parse version info if available
-        let version: string | undefined;
-        try {
-          const data: LMStudioHealthResponse = await response.json();
-          version = data.version;
-        } catch {
-          // Health endpoint might return plain text or no body
-        }
-        return { reachable: true, url, version };
+        return port;
       }
+      
     } catch {
-      // Try next URL
       continue;
     }
   }
-
-  return { reachable: false };
+  
+  return null;
 }
 
 /**
@@ -704,11 +971,16 @@ export async function fetchLMStudioModel(
 
 /**
  * Check if LM Studio is running and has a model loaded
- * Now includes health check and uses refactored URL building
+ * Enhanced with detailed status information and diagnostics
  */
 export async function checkLMStudioStatus(
   baseUrl?: string,
-  options?: { timeoutMs?: number; port?: number }
+  options?: { 
+    timeoutMs?: number; 
+    port?: number;
+    maxRetries?: number;
+    testChatEndpoint?: boolean;
+  }
 ): Promise<{
   running: boolean;
   reachable: boolean;
@@ -716,30 +988,35 @@ export async function checkLMStudioStatus(
   modelId?: string;
   actualUrl?: string;
   version?: string;
+  port?: number;
+  error?: LMStudioHealthError;
+  attempts?: number;
 }> {
-  const timeout = options?.timeoutMs ?? LM_STUDIO_HEALTH_TIMEOUT;
-
-  // First check if server is reachable
-  const health = await checkLMStudioHealth(baseUrl, { timeoutMs: timeout });
-
+  const health = await checkLMStudioHealth(baseUrl, {
+    timeoutMs: options?.timeoutMs,
+    maxRetries: options?.maxRetries,
+    testChatEndpoint: options?.testChatEndpoint ?? true,
+  });
+  
   if (!health.reachable) {
     return {
       running: false,
       reachable: false,
       modelLoaded: false,
+      error: health.error,
+      attempts: health.attempts,
     };
   }
-
-  // Then check for loaded model
-  const modelId = await fetchLMStudioModel(health.url, { timeoutMs: timeout, port: options?.port });
-
+  
   return {
-    running: modelId !== null,
+    running: true,
     reachable: true,
-    modelLoaded: modelId !== null,
-    modelId: modelId || undefined,
+    modelLoaded: health.modelTested,
+    modelId: health.modelId,
     actualUrl: health.url,
+    port: health.port,
     version: health.version,
+    attempts: health.attempts,
   };
 }
 

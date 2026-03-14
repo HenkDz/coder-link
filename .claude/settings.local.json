@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(*)",
+      "Bash(grep -n 'model:\\\\$z' \"C:/Users/nooro/AppData/Local/nvm/nodejs/node_modules/@obl-hq/ob1/bundle/gemini.js\")"
+    ]
+  }
+}
