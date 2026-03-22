@@ -86,8 +86,8 @@ program
         script = `#!/bin/bash
 _coder_link_completion() {
   local cur="\${COMP_WORDS[COMP_CWORD]}"
-  local commands="init auth lang tools mcp doctor status completion"
-  local tools="claude-code opencode crush factory-droid kimi amp pi codex"
+  local commands="init auth lang tools mcp doctor status run completion"
+  local tools="claude-code opencode crush factory-droid kimi amp pi codex mastra ob1 droid claude mastracode"
   local providers="${providerValues}"
   local services="filesystem github"
   
@@ -98,6 +98,13 @@ _coder_link_completion() {
     case "$subcommand" in
       auth)
         COMPREPLY=($(compgen -W "${providerValues} revoke reload" -- "$cur"))
+        ;;
+      run)
+        if [[ \${COMP_CWORD} -eq 2 ]]; then
+          COMPREPLY=($(compgen -W "$tools" -- "$cur"))
+        else
+          COMPREPLY=($(compgen -W "--new-window --same-window --skip-config --model --plan --api-key --json" -- "$cur"))
+        fi
         ;;
       tools)
         if [[ "\${COMP_WORDS[2]}" == "install" || "\${COMP_WORDS[2]}" == "uninstall" ]]; then
@@ -132,13 +139,13 @@ _coder_link() {
   local curcontext="$curcontext" state line
   typeset -A opt_args
   
-  local commands=(init auth lang tools mcp doctor status completion)
-  local tools=(claude-code opencode crush factory-droid kimi amp pi codex)
+  local commands=(init auth lang tools mcp doctor status run completion)
+  local tools=(claude-code opencode crush factory-droid kimi amp pi codex mastra ob1 droid claude mastracode)
   local providers=(${PROVIDER_PLAN_VALUES.join(' ')})
   local services=(filesystem github)
   
-  _arguments -C \
-    '1: :->command' \
+  _arguments -C \\
+    '1: :->command' \\
     '*: :->args'
   
   case "$state" in
@@ -149,6 +156,9 @@ _coder_link() {
       case "$line[1]" in
         auth)
           _describe -t providers "provider" providers && _values "actions" revoke reload
+          ;;
+        run)
+          _describe -t tools "tool" tools
           ;;
         tools)
           _values "subcommand" list install uninstall
@@ -178,11 +188,26 @@ complete -c coder-link -n "__fish_use_subcommand" -a "tools" -d "Manage coding t
 complete -c coder-link -n "__fish_use_subcommand" -a "mcp" -d "Manage MCP services"
 complete -c coder-link -n "__fish_use_subcommand" -a "doctor" -d "Inspect system configuration"
 complete -c coder-link -n "__fish_use_subcommand" -a "status" -d "Show current status"
+complete -c coder-link -n "__fish_use_subcommand" -a "run" -d "Launch a coding tool"
 complete -c coder-link -n "__fish_use_subcommand" -a "completion" -d "Generate shell completion"
 
 # Auth subcommands
 ${PROVIDER_PLAN_VALUES.map((provider) => `complete -c coder-link -n "__fish_seen_subcommand_from auth" -a "${provider}"`).join('\n')}
 complete -c coder-link -n "__fish_seen_subcommand_from auth" -a "revoke"
+
+# Run subcommands (tool names)
+complete -c coder-link -n "__fish_seen_subcommand_from run" -a "claude-code"
+complete -c coder-link -n "__fish_seen_subcommand_from run" -a "opencode"
+complete -c coder-link -n "__fish_seen_subcommand_from run" -a "crush"
+complete -c coder-link -n "__fish_seen_subcommand_from run" -a "factory-droid"
+complete -c coder-link -n "__fish_seen_subcommand_from run" -a "kimi"
+complete -c coder-link -n "__fish_seen_subcommand_from run" -a "amp"
+complete -c coder-link -n "__fish_seen_subcommand_from run" -a "pi"
+complete -c coder-link -n "__fish_seen_subcommand_from run" -a "codex"
+complete -c coder-link -n "__fish_seen_subcommand_from run" -a "mastra"
+complete -c coder-link -n "__fish_seen_subcommand_from run" -a "ob1"
+complete -c coder-link -n "__fish_seen_subcommand_from run" -a "droid" -d "Alias for factory-droid"
+complete -c coder-link -n "__fish_seen_subcommand_from run" -a "claude" -d "Alias for claude-code"
 `;
         break;
       case 'pwsh':
@@ -190,8 +215,8 @@ complete -c coder-link -n "__fish_seen_subcommand_from auth" -a "revoke"
   script = `Register-ArgumentCompleter -Native -CommandName coder-link -ScriptBlock {
     param($wordToComplete, $commandAst, $cursorPosition)
     
-    $commands = @('init', 'auth', 'lang', 'tools', 'mcp', 'doctor', 'status', 'completion')
-    $tools = @('claude-code', 'opencode', 'crush', 'factory-droid', 'kimi', 'amp', 'pi', 'codex')
+    $commands = @('init', 'auth', 'lang', 'tools', 'mcp', 'doctor', 'status', 'run', 'completion')
+    $tools = @('claude-code', 'opencode', 'crush', 'factory-droid', 'kimi', 'amp', 'pi', 'codex', 'mastra', 'ob1', 'droid', 'claude', 'mastracode')
     $providers = @(${providerValuesQuoted})
     $services = @('filesystem', 'github')
     
@@ -207,6 +232,13 @@ complete -c coder-link -n "__fish_seen_subcommand_from auth" -a "revoke"
             'auth' {
                 $providers + @('revoke', 'reload') | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
                     [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)
+                }
+            }
+            'run' {
+                if ($commandElements.Count -eq 2) {
+                    $tools | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
+                        [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)
+                    }
                 }
             }
             'tools' {
@@ -1167,6 +1199,95 @@ program
       printError(
         error instanceof Error ? error.message : String(error),
         'Run "coder-link doctor" for detailed diagnostics'
+      );
+      process.exit(1);
+    }
+  });
+
+// Run tool directly (without entering interactive menu)
+program
+  .command('run <tool>')
+  .description('Launch a coding tool with provider config applied (e.g., "coder-link run droid")')
+  .option('-n, --new-window', 'Launch in a new terminal window (Windows only)')
+  .option('-s, --same-window', 'Launch in this terminal (default on Windows)')
+  .option('--skip-config', 'Skip provider config sync, just launch the tool')
+  .option('-m, --model <model>', 'Override model to use')
+  .option('-p, --plan <plan>', 'Provider plan to use (overrides default)')
+  .option('-k, --api-key <key>', 'API key to use (overrides stored key)')
+  .addOption(jsonOption)
+  .action(async (tool: string, options) => {
+    try {
+      // Set JSON output format early for consistent error handling
+      if (options.json) {
+        setOutputFormat('json');
+      }
+
+      // Normalize tool name (allow common aliases)
+      const toolAliases: Record<string, string> = {
+        'droid': 'factory-droid',
+        'factory': 'factory-droid',
+        'factory-droid': 'factory-droid',
+        'claude': 'claude-code',
+        'claude-code': 'claude-code',
+        'opencode': 'opencode',
+        'crush': 'crush',
+        'kimi': 'kimi',
+        'amp': 'amp',
+        'pi': 'pi',
+        'codex': 'codex',
+        'mastra': 'mastra',
+        'mastracode': 'mastra',
+        'ob1': 'ob1',
+      };
+
+      const normalizedTool = toolAliases[tool.toLowerCase()] || tool.toLowerCase();
+
+      if (!toolManager.isSupportedTool(normalizedTool)) {
+        const validTools = toolManager.getSupportedTools().join(', ');
+        if (getOutputFormat().isJson) {
+          printData({ error: `Unknown tool: ${tool}`, validTools, aliases: ['droid', 'claude', 'mastracode'] });
+        } else {
+          printError(
+            `Unknown tool: ${tool}`,
+            `Valid tools: ${validTools}. Aliases: droid, claude, mastracode`
+          );
+        }
+        process.exit(1);
+      }
+
+      const { runTool } = await import('./lib/run-tool.js');
+      const result = await runTool(normalizedTool, {
+        newWindow: options.newWindow,
+        sameWindow: options.sameWindow,
+        skipConfig: options.skipConfig,
+        model: options.model,
+        plan: options.plan,
+        apiKey: options.apiKey,
+        nonInteractive: true,
+      });
+
+      if (getOutputFormat().isJson) {
+        printData({
+          tool: normalizedTool,
+          success: result.success,
+          exitCode: result.exitCode,
+          error: result.error || null,
+        });
+      }
+
+      if (!result.success) {
+        process.exit(1);
+      }
+
+      // Pass through exit code from the tool
+      if (typeof result.exitCode === 'number') {
+        process.exit(result.exitCode);
+      }
+    } catch (error) {
+      logger.logError('run', error);
+      printError(
+        error instanceof Error ? error.message : String(error),
+        'Run "coder-link tools list" to see available tools'
       );
       process.exit(1);
     }

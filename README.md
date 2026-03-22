@@ -7,6 +7,7 @@ A CLI that links coding tools to models from multiple providers.
 - **Multi-Provider Support**: GLM Coding Plan (Global/China), Kimi 2.5, OpenRouter, NVIDIA, and LM Studio (local)
 - **Interactive Wizard**: Friendly onboarding guidance on first launch
 - **Tool Management**: Automatically configures CLI tools with your API credentials
+- **Quick Launch**: Run any configured tool directly with `coder-link run <tool>`
 - **MCP Configuration**: Easily manage Model Context Protocol services
 - **Local Storage**: All settings stored securely on your machine
 - **Internationalization**: Chinese and English bilingual interface
@@ -127,6 +128,36 @@ coder-link tools list             # List all supported tools and their status
 coder-link tools install <tool>   # Install a coding tool
 coder-link tools uninstall <tool> # Uninstall a coding tool
 ```
+
+### Run a tool directly
+
+Launch any configured coding tool without entering the interactive menu:
+
+```bash
+coder-link run droid              # Launch Factory Droid with your configured provider
+coder-link run claude             # Launch Claude Code
+coder-link run opencode           # Launch OpenCode
+coder-link run crush              # Launch Crush
+coder-link run kimi               # Launch Kimi
+coder-link run pi                 # Launch Pi CLI
+coder-link run codex              # Launch Codex CLI
+coder-link run mastra             # Launch Mastra Code
+coder-link run ob1                # Launch OB1 CLI
+```
+
+**Options:**
+
+```bash
+coder-link run droid --new-window     # Launch in a new terminal window (Windows only)
+coder-link run droid --same-window    # Launch in this terminal
+coder-link run droid --skip-config    # Skip provider config sync, just launch
+coder-link run droid --model <model>  # Override model to use
+coder-link run droid --plan <plan>    # Use a specific provider plan
+coder-link run droid --api-key <key>  # Use a specific API key
+coder-link run droid --json           # Output as JSON for programmatic use
+```
+
+**Tool aliases:** You can use short names like `droid` for `factory-droid`, `claude` for `claude-code`, and `mastracode` for `mastra`.
 
 ### MCP management
 
