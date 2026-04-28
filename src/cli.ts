@@ -62,7 +62,7 @@ function resolveMcpTool(explicitTool?: string): ToolName {
 program
   .name('coder-link')
   .description('Coder Link — Connect coding tools to any model/provider')
-  .version('0.0.9')
+  .version('0.3.0')
   .addOption(formatOption)
   .hook('preAction', (thisCommand) => {
     const opts = thisCommand.opts();
