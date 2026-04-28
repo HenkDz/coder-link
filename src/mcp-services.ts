@@ -1,4 +1,23 @@
 import type { MCPService } from './lib/tool-manager.js';
+import type { Plan } from './utils/config.js';
+import { getAllPlans } from './lib/provider-registry.js';
+
+const ALL_PLANS = getAllPlans();
+
+function envForAllPlans(env: Record<string, string>): Record<Plan, Record<string, string>> {
+  return Object.fromEntries(ALL_PLANS.map((plan) => [plan, { ...env }])) as Record<Plan, Record<string, string>>;
+}
+
+function zAiUrlTemplate(path: string): Record<Plan, string> {
+  return Object.fromEntries(
+    ALL_PLANS.map((plan) => [
+      plan,
+      plan === 'glm_coding_plan_china'
+        ? `https://open.bigmodel.cn/api/mcp/${path}/mcp`
+        : `https://api.z.ai/api/mcp/${path}/mcp`,
+    ])
+  ) as Record<Plan, string>;
+}
 
 export const BUILTIN_MCP_SERVICES: MCPService[] = [
   {
@@ -20,17 +39,7 @@ export const BUILTIN_MCP_SERVICES: MCPService[] = [
     // GitHub token should come from GITHUB_TOKEN in your environment
     // (we intentionally do not inject provider API keys into GitHub MCP).
     requiresAuth: false,
-    envTemplate: {
-      glm_coding_plan_global: { GITHUB_TOKEN: '' },
-      glm_coding_plan_china: { GITHUB_TOKEN: '' },
-      kimi: { GITHUB_TOKEN: '' },
-      openrouter: { GITHUB_TOKEN: '' },
-      nvidia: { GITHUB_TOKEN: '' },
-      lmstudio: { GITHUB_TOKEN: '' },
-      alibaba: { GITHUB_TOKEN: '' },
-      alibaba_api: { GITHUB_TOKEN: '' },
-      zenmux: { GITHUB_TOKEN: '' },
-    }
+    envTemplate: envForAllPlans({ GITHUB_TOKEN: '' })
   },
   {
     id: 'coolify-mcp',
@@ -42,17 +51,7 @@ export const BUILTIN_MCP_SERVICES: MCPService[] = [
     // Coolify credentials should come from environment variables
     // Set COOLIFY_BASE_URL and COOLIFY_TOKEN before installing
     requiresAuth: false,
-    envTemplate: {
-      glm_coding_plan_global: { COOLIFY_BASE_URL: '', COOLIFY_TOKEN: '' },
-      glm_coding_plan_china: { COOLIFY_BASE_URL: '', COOLIFY_TOKEN: '' },
-      kimi: { COOLIFY_BASE_URL: '', COOLIFY_TOKEN: '' },
-      openrouter: { COOLIFY_BASE_URL: '', COOLIFY_TOKEN: '' },
-      nvidia: { COOLIFY_BASE_URL: '', COOLIFY_TOKEN: '' },
-      lmstudio: { COOLIFY_BASE_URL: '', COOLIFY_TOKEN: '' },
-      alibaba: { COOLIFY_BASE_URL: '', COOLIFY_TOKEN: '' },
-      alibaba_api: { COOLIFY_BASE_URL: '', COOLIFY_TOKEN: '' },
-      zenmux: { COOLIFY_BASE_URL: '', COOLIFY_TOKEN: '' },
-    }
+    envTemplate: envForAllPlans({ COOLIFY_BASE_URL: '', COOLIFY_TOKEN: '' })
   },
   // Z AI MCP Servers (GLM API)
   {
@@ -76,17 +75,7 @@ export const BUILTIN_MCP_SERVICES: MCPService[] = [
     protocol: 'streamable-http',
     authPlan: 'glm_coding_plan_global',
     authScheme: 'raw',
-    urlTemplate: {
-      glm_coding_plan_global: 'https://api.z.ai/api/mcp/web_search_prime/mcp',
-      glm_coding_plan_china: 'https://open.bigmodel.cn/api/mcp/web_search_prime/mcp',
-      kimi: 'https://api.z.ai/api/mcp/web_search_prime/mcp',
-      openrouter: 'https://api.z.ai/api/mcp/web_search_prime/mcp',
-      nvidia: 'https://api.z.ai/api/mcp/web_search_prime/mcp',
-      lmstudio: 'https://api.z.ai/api/mcp/web_search_prime/mcp',
-      alibaba: 'https://api.z.ai/api/mcp/web_search_prime/mcp',
-      alibaba_api: 'https://api.z.ai/api/mcp/web_search_prime/mcp',
-      zenmux: 'https://api.z.ai/api/mcp/web_search_prime/mcp'
-    },
+    urlTemplate: zAiUrlTemplate('web_search_prime'),
     requiresAuth: true
   },
   {
@@ -95,17 +84,7 @@ export const BUILTIN_MCP_SERVICES: MCPService[] = [
     description: 'Z AI web content reader service',
     protocol: 'streamable-http',
     authPlan: 'glm_coding_plan_global',
-    urlTemplate: {
-      glm_coding_plan_global: 'https://api.z.ai/api/mcp/web_reader/mcp',
-      glm_coding_plan_china: 'https://open.bigmodel.cn/api/mcp/web_reader/mcp',
-      kimi: 'https://api.z.ai/api/mcp/web_reader/mcp',
-      openrouter: 'https://api.z.ai/api/mcp/web_reader/mcp',
-      nvidia: 'https://api.z.ai/api/mcp/web_reader/mcp',
-      lmstudio: 'https://api.z.ai/api/mcp/web_reader/mcp',
-      alibaba: 'https://api.z.ai/api/mcp/web_reader/mcp',
-      alibaba_api: 'https://api.z.ai/api/mcp/web_reader/mcp',
-      zenmux: 'https://api.z.ai/api/mcp/web_reader/mcp'
-    },
+    urlTemplate: zAiUrlTemplate('web_reader'),
     requiresAuth: true
   },
   {
@@ -114,17 +93,7 @@ export const BUILTIN_MCP_SERVICES: MCPService[] = [
     description: 'Z AI reading assistant service',
     protocol: 'streamable-http',
     authPlan: 'glm_coding_plan_global',
-    urlTemplate: {
-      glm_coding_plan_global: 'https://api.z.ai/api/mcp/zread/mcp',
-      glm_coding_plan_china: 'https://open.bigmodel.cn/api/mcp/zread/mcp',
-      kimi: 'https://api.z.ai/api/mcp/zread/mcp',
-      openrouter: 'https://api.z.ai/api/mcp/zread/mcp',
-      nvidia: 'https://api.z.ai/api/mcp/zread/mcp',
-      lmstudio: 'https://api.z.ai/api/mcp/zread/mcp',
-      alibaba: 'https://api.z.ai/api/mcp/zread/mcp',
-      alibaba_api: 'https://api.z.ai/api/mcp/zread/mcp',
-      zenmux: 'https://api.z.ai/api/mcp/zread/mcp'
-    },
+    urlTemplate: zAiUrlTemplate('zread'),
     requiresAuth: true
   }
 ];

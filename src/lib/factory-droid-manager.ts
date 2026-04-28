@@ -103,20 +103,40 @@ export class FactoryDroidManager {
   }
 
   private getDisplayNameFilters(): string[] {
-    // Match by short name which is common across format variations
-    // e.g., both "GLM Coding Plan Global" and "GLM Coding Plan (Global)" contain "GLM_Global" pattern
-    // but we also need to match legacy short names
-    return [
-      'GLM',           // Catches "GLM Coding Plan Global" and "GLM Coding Plan (Global)" and "GLM-4.7"
-      'Kimi',          // Catches "Kimi (Moonshot)" and variants
-      'OpenRouter',    // Catches OpenRouter variants
-      'NVIDIA',        // Catches NVIDIA variants
-      'LM Studio',     // Catches LM Studio variants
-      'Alibaba',       // Catches Alibaba variants (Qwen)
-      'ZenMux',        // Catches ZenMux variants
-      'Qwen',          // Catches Qwen via Alibaba
-      'Moonshot',      // Catches Moonshot/Kimi variants
-    ];
+    const registryNames = Object.values(PROVIDER_CONFIGS).flatMap((provider) => [
+      provider.displayName,
+      provider.shortName.replace(/_/g, ' '),
+    ]);
+
+    return Array.from(new Set([
+      ...registryNames,
+      // Legacy/broad names from older coder-link versions
+      'GLM',
+      'Kimi',
+      'Qwen',
+      'Moonshot',
+    ].filter(Boolean)));
+  }
+
+  private isManagedModel(model: any): boolean {
+    if (!model || typeof model !== 'object') return false;
+    if (typeof model.baseUrl === 'string' && detectPlanFromUrl(model.baseUrl)) return true;
+    const displayName = typeof model.displayName === 'string' ? model.displayName : '';
+    return this.getDisplayNameFilters().some((filter) => displayName.includes(filter));
+  }
+
+  private getActiveCustomModel(config: any): any | null {
+    const customModels = Array.isArray(config.customModels) ? config.customModels : [];
+    if (customModels.length === 0) return null;
+
+    const activeId = config.sessionDefaultSettings?.model;
+    if (typeof activeId === 'string') {
+      const match = activeId.match(/-(\d+)$/);
+      const index = match ? Number(match[1]) : NaN;
+      if (Number.isInteger(index) && customModels[index]) return customModels[index];
+    }
+
+    return customModels.find((model: any) => this.isManagedModel(model)) || null;
   }
 
   // --------------------------------------------------------------------------
@@ -266,10 +286,7 @@ export class FactoryDroidManager {
     const currentConfig = this.getConfig();
 
     if (currentConfig.customModels) {
-      const displayNameFilters = this.getDisplayNameFilters();
-      currentConfig.customModels = currentConfig.customModels.filter((m: any) =>
-        displayNameFilters.every((filter) => !m.displayName?.includes(filter))
-      );
+      currentConfig.customModels = currentConfig.customModels.filter((m: any) => !this.isManagedModel(m));
 
       if (currentConfig.customModels.length === 0) {
         delete currentConfig.customModels;
@@ -291,11 +308,8 @@ export class FactoryDroidManager {
         return { plan: null, apiKey: null };
       }
 
-      // Find managed configurations by display name patterns
-      const displayNameFilters = this.getDisplayNameFilters();
-      const managedModel = config.customModels.find((m: any) =>
-        displayNameFilters.some((filter) => m.displayName?.includes(filter))
-      );
+      // Prefer the active model, then fall back to any coder-link managed provider model.
+      const managedModel = this.getActiveCustomModel(config);
 
       if (!managedModel) {
         return { plan: null, apiKey: null };

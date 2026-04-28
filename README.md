@@ -4,7 +4,7 @@ A CLI that links coding tools to models from multiple providers.
 
 ## Features
 
-- **Multi-Provider Support**: GLM Coding Plan (Global/China), Kimi 2.5, OpenRouter, NVIDIA, and LM Studio (local)
+- **Multi-Provider Support**: GLM Coding Plan (Global/China), Kimi 2.5, OpenRouter, NVIDIA, LM Studio (local), Alibaba, ZenMux, and Xiaomi Token Plan
 - **Interactive Wizard**: Friendly onboarding guidance on first launch
 - **Tool Management**: Automatically configures CLI tools with your API credentials
 - **Quick Launch**: Run any configured tool directly with `coder-link run <tool>`
@@ -70,7 +70,7 @@ Once you enter the wizard UI, use Up/Down arrow keys to navigate and press Enter
 The wizard will help you complete:
 
 1. **Select UI language** (English or Chinese)
-2. **Choose a provider** (GLM Coding Plan Global/China, Kimi 2.5, OpenRouter, or NVIDIA)
+2. **Choose a provider** (GLM Coding Plan Global/China, Kimi 2.5, OpenRouter, NVIDIA, Alibaba, ZenMux, Xiaomi, or LM Studio)
 3. **Enter your API key**
 4. **Select tools to manage**
 5. **Automatically configure selected tools**
@@ -116,6 +116,7 @@ coder-link auth glm_coding_plan_china <token>   # Choose China plan and set key
 coder-link auth kimi <token>                    # Set Kimi API key
 coder-link auth openrouter <token>              # Set OpenRouter API key
 coder-link auth nvidia <token>                 # Set NVIDIA API key
+coder-link auth xiaomi <token>                 # Set Xiaomi Token Plan API key
 coder-link auth revoke                       # Delete the saved key
 coder-link auth reload <tool>                # Reload config into a tool
 coder-link auth --help                        # Show help for auth commands
@@ -209,6 +210,12 @@ api_key: your-api-key-here     # API key
 - **Base URL**: Via NVIDIA's API gateway
 - **Models**: Various NVIDIA-hosted models
 - Sign up for access at [NVIDIA's developer portal](https://developer.nvidia.com/)
+
+### Xiaomi Token Plan (Singapore)
+
+- **OpenAI Base URL**: `https://token-plan-sgp.xiaomimimo.com/v1`
+- **Anthropic Base URL**: `https://token-plan-sgp.xiaomimimo.com/anthropic`
+- Configure with `coder-link auth xiaomi <token>` or through Provider Setup.
 
 ## How It Works
 

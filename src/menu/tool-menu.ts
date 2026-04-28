@@ -13,8 +13,6 @@ import { printError, printSuccess, printWarning, printInfo } from '../utils/outp
 import { startCommand, installHint, createSafeSpinner, pause, getProviderIncompatibility, selectModelId } from './shared.js';
 import { providerSetupFlow } from './provider-menu.js';
 import { mcpMenu } from './mcp-menu.js';
-import { toolSkillsMenu, toolSupportsSkills } from './skills-menu.js';
-import type { ToolWithSkills } from './skills-menu.js';
 
 async function chooseToolProviderPlan(tool: string): Promise<Plan | '__back'> {
   const enabled = new Set(configManager.getEnabledProviders());
@@ -100,6 +98,9 @@ async function applyProviderToTool(tool: string, plan: Plan): Promise<boolean> {
         ? `Connected ${toolLabel(tool)} to ${planLabel(plan)} (${modelOverride})`
         : `Connected ${toolLabel(tool)} to ${planLabel(plan)}`
     );
+    if (tool === 'factory-droid' && !configManager.getFactoryApiKey() && !process.env.FACTORY_API_KEY) {
+      printInfo('Provider is connected. Factory Droid also needs your Factory account API key before launch.');
+    }
     return true;
   } catch (err) {
     spinner.fail('Failed to apply configuration');
@@ -110,8 +111,9 @@ async function applyProviderToTool(tool: string, plan: Plan): Promise<boolean> {
 export async function toolMenu(tool: string): Promise<void> {
   const capabilities = toolManager.getCapabilities(tool);
 
+  let first=true;
   while (true) {
-    console.clear();
+    if(first){console.clear();first=false;}
     printHeader(toolLabel(tool));
 
     const auth = configManager.getAuth();
@@ -153,8 +155,9 @@ export async function toolMenu(tool: string): Promise<void> {
     }
 
     if (tool === 'factory-droid') {
-      const factoryKey = configManager.getFactoryApiKey();
-      console.log(`  ${chalk.gray('Factory API Key:')} ${factoryKey ? chalk.green(maskApiKey(factoryKey)) : chalk.yellow('Not set')}`);
+      const factoryKey = configManager.getFactoryApiKey() || process.env.FACTORY_API_KEY;
+      console.log(`  ${chalk.gray('Factory Account API Key:')} ${factoryKey ? chalk.green(maskApiKey(factoryKey)) : chalk.yellow('Not set')}`);
+      console.log(chalk.gray('  Note: this is separate from your model provider key and is required to launch Droid.'));
       console.log();
     }
 
@@ -175,6 +178,9 @@ export async function toolMenu(tool: string): Promise<void> {
       } else {
         printInfo('Using tool-specific provider (different from default)');
       }
+      if (tool === 'factory-droid' && !configManager.getFactoryApiKey() && !process.env.FACTORY_API_KEY) {
+        printWarning('Droid launch still needs a Factory account API key.', 'Use “Configure Factory Account API Key” below.');
+      }
       console.log();
     } else if (hasGlobalProvider) {
       printInfo('Tool is not configured yet. You can use default provider or set one manually.');
@@ -189,7 +195,7 @@ export async function toolMenu(tool: string): Promise<void> {
     console.log();
     printNavigationHints();
 
-    type ToolAction = 'sync_global' | 'switch_profile' | 'change_model' | 'unload' | 'mcp' | 'skills' | 'start' | 'start_new' | 'start_same' | '__back';
+    type ToolAction = 'sync_global' | 'switch_profile' | 'change_model' | 'factory_key' | 'unload' | 'mcp' | 'start' | 'start_new' | 'start_same' | '__back';
     const choices: Array<{ name: string; value: ToolAction } | inquirer.Separator> = [];
 
     const lastTool = configManager.getLastUsedTool();
@@ -233,18 +239,19 @@ export async function toolMenu(tool: string): Promise<void> {
       choices.push({ name: '🧪 Change Model ID', value: 'change_model' });
     }
 
+    if (tool === 'factory-droid') {
+      choices.push({ name: '🔑 Configure Factory Account API Key', value: 'factory_key' });
+    }
+
     if (capabilities.supportsProviderConfig && isConfigured) {
       choices.push({ name: '🗑 Disconnect Provider from This Tool', value: 'unload' });
     }
 
-    if (capabilities.supportsProviderConfig || capabilities.supportsMcp || toolSupportsSkills(tool)) {
+    if (capabilities.supportsProviderConfig || capabilities.supportsMcp) {
       choices.push(new inquirer.Separator());
     }
     if (capabilities.supportsMcp) {
       choices.push({ name: '🔌 MCP Servers', value: 'mcp' });
-    }
-    if (toolSupportsSkills(tool)) {
-      choices.push({ name: '🎯 Skills', value: 'skills' });
     }
 
     if (!installed) {
@@ -348,6 +355,26 @@ export async function toolMenu(tool: string): Promise<void> {
           throw err;
         }
         await pause();
+      } else if (action === 'factory_key') {
+        const existing = configManager.getFactoryApiKey() || process.env.FACTORY_API_KEY;
+        const { key } = await inquirer.prompt<{ key: string }>([
+          {
+            type: 'password',
+            name: 'key',
+            message: existing ? `Factory Account API Key [current: ${maskApiKey(existing)}]:` : 'Factory Account API Key:',
+            mask: '*',
+          },
+        ]);
+        const trimmed = key.trim();
+        if (trimmed) {
+          configManager.setFactoryApiKey(trimmed);
+          printSuccess('Factory account API key saved');
+        } else if (existing) {
+          printInfo('Kept existing Factory account API key');
+        } else {
+          printWarning('Factory account API key was not saved. Droid may not launch without it.');
+        }
+        await pause();
       } else if (action === 'unload') {
         const { confirm } = await inquirer.prompt<{ confirm: boolean }>([
           {
@@ -368,8 +395,6 @@ export async function toolMenu(tool: string): Promise<void> {
         await pause();
       } else if (action === 'mcp') {
         await mcpMenu(tool);
-      } else if (action === 'skills') {
-        await toolSkillsMenu(tool as ToolWithSkills);
       } else if (action === 'start') {
         await launchTool(tool);
       } else if (action === 'start_new') {
@@ -383,6 +408,22 @@ export async function toolMenu(tool: string): Promise<void> {
       await pause();
     }
   }
+}
+
+async function launchInTerminal(
+  start: { cmd: string; args: string[] },
+  launchMode: 'same' | 'new',
+  env?: Record<string, string>
+): Promise<void> {
+  if (launchMode === 'new') {
+    const ok = runInNewTerminal(start.cmd, start.args, env);
+    if (!ok) {
+      printWarning('Failed to open a new terminal window. Launching here instead.');
+      env ? await runInteractiveWithEnv(start.cmd, start.args, env) : await runInteractive(start.cmd, start.args);
+    }
+    return;
+  }
+  env ? await runInteractiveWithEnv(start.cmd, start.args, env) : await runInteractive(start.cmd, start.args);
 }
 
 async function launchTool(tool: string, mode?: 'same' | 'new'): Promise<void> {
@@ -546,31 +587,22 @@ async function launchTool(tool: string, mode?: 'same' | 'new'): Promise<void> {
       return;
     }
 
-    const codexEnv: Record<string, string> = {
-      OPENAI_API_KEY: apiKey,
-    }
-
-    if (launchMode === 'new') {
-      const ok = runInNewTerminal(start.cmd, start.args, codexEnv);
-      if (!ok) {
-        printWarning('Failed to open a new terminal window. Launching here instead.');
-        await runInteractiveWithEnv(start.cmd, start.args, codexEnv);
-      }
-      return;
-    }
-
-    await runInteractiveWithEnv(start.cmd, start.args, codexEnv);
+    await launchInTerminal(start, launchMode, { OPENAI_API_KEY: apiKey });
     return;
   }
 
   if (tool === 'factory-droid') {
     let factoryKey = configManager.getFactoryApiKey() || process.env.FACTORY_API_KEY;
     if (!factoryKey) {
+      printWarning(
+        'Factory Droid needs a Factory account API key to launch.',
+        'This is separate from your Xiaomi/provider API key, which is already used for model configuration.'
+      );
       const { key } = await inquirer.prompt<{ key: string }>([
         {
           type: 'password',
           name: 'key',
-          message: 'Factory API Key (FACTORY_API_KEY):',
+          message: 'Factory Account API Key (FACTORY_API_KEY):',
           mask: '*',
         },
       ]);
@@ -584,16 +616,9 @@ async function launchTool(tool: string, mode?: 'same' | 'new'): Promise<void> {
       }
     }
 
-    if (launchMode === 'new') {
-      const ok = runInNewTerminal(start.cmd, start.args, { FACTORY_API_KEY: factoryKey });
-      if (!ok) {
-        printWarning('Failed to open a new terminal window. Launching here instead.');
-        await runInteractiveWithEnv(start.cmd, start.args, { FACTORY_API_KEY: factoryKey });
-      }
-      return;
+    if (factoryKey) {
+      await launchInTerminal(start, launchMode, { FACTORY_API_KEY: factoryKey });
     }
-
-    await runInteractiveWithEnv(start.cmd, start.args, { FACTORY_API_KEY: factoryKey });
     return;
   }
 
@@ -638,28 +663,11 @@ async function launchTool(tool: string, mode?: 'same' | 'new'): Promise<void> {
     if (ob1ApiUrl) ob1Env.OPENROUTER_API_URL = ob1ApiUrl;
     if (ob1ApiKey) ob1Env.OPENROUTER_API_KEY = ob1ApiKey;
 
-    if (launchMode === 'new') {
-      const ok = runInNewTerminal(start.cmd, start.args, ob1Env);
-      if (!ok) {
-        printWarning('Failed to open a new terminal window. Launching here instead.');
-        await runInteractiveWithEnv(start.cmd, start.args, ob1Env);
-      }
-      return;
-    }
-
-    await runInteractiveWithEnv(start.cmd, start.args, ob1Env);
+    await launchInTerminal(start, launchMode, ob1Env);
     return;
   }
 
-  if (launchMode === 'new') {
-    const ok = runInNewTerminal(start.cmd, start.args);
-    if (!ok) {
-      printWarning('Failed to open a new terminal window. Launching here instead.');
-      await runInteractive(start.cmd, start.args);
-    }
-    return;
-  }
-  await runInteractive(start.cmd, start.args);
+  await launchInTerminal(start, launchMode);
 }
 
 async function manageToolAvailability(): Promise<void> {
@@ -691,8 +699,9 @@ async function manageToolAvailability(): Promise<void> {
 }
 
 export async function toolSelectMenu(): Promise<void> {
+  let first=true;
   while (true) {
-    console.clear();
+    if(first){console.clear();first=false;}
     printHeader('Coding Tools');
     const auth = configManager.getAuth();
     printStatusBar(auth.plan, auth.apiKey);

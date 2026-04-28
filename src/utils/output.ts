@@ -25,7 +25,6 @@ export function getOutputFormat(): OutputFormatter {
 }
 
 export { globalFormatter };
-export default { setOutputFormat, getOutputFormat, printData, formatTable, truncateText, printError, printSuccess, printWarning, printInfo };
 
 /**
  * Print data based on current format
@@ -71,15 +70,6 @@ export function formatTable(
   }
   
   return lines.join('\n');
-}
-
-/**
- * Truncate text to fit terminal width
- */
-export function truncateText(text: string, maxWidth?: number): string {
-  const width = maxWidth || process.stdout.columns || 80;
-  if (text.length <= width) return text;
-  return text.slice(0, width - 3) + '...';
 }
 
 /**

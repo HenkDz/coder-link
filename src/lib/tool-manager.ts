@@ -1,4 +1,5 @@
 import type { Plan } from '../utils/config.js';
+import { getAllPlans, supportsProtocol, type Protocol } from './provider-registry.js';
 
 export interface MCPService {
   id: string;
@@ -44,17 +45,9 @@ export type ToolName = 'claude-code' | 'opencode' | 'crush' | 'factory-droid' | 
 
 const TOOL_NAMES: ToolName[] = ['claude-code', 'opencode', 'crush', 'factory-droid', 'kimi', 'amp', 'pi', 'codex', 'mastra', 'ob1'];
 
-const ALL_PLANS: Plan[] = [
-  'glm_coding_plan_global',
-  'glm_coding_plan_china',
-  'kimi',
-  'openrouter',
-  'nvidia',
-  'lmstudio',
-  'alibaba',
-  'alibaba_api',
-  'zenmux',
-];
+const ALL_PLANS: Plan[] = getAllPlans();
+const OPENAI_PLANS: Plan[] = ALL_PLANS.filter((plan) => supportsProtocol(plan, 'openai'));
+const ANTHROPIC_PLANS: Plan[] = ALL_PLANS.filter((plan) => supportsProtocol(plan, 'anthropic'));
 
 export interface ToolCapabilities {
   supportsProviderConfig: boolean;
@@ -62,6 +55,8 @@ export interface ToolCapabilities {
   supportsSkills: boolean;
   supportsModelSelection: boolean;
   supportedPlans: Plan[];
+  /** Protocol required by the tool integration. Omitted means all built-in providers are supported. */
+  requiredProtocol?: Protocol;
   notes?: string;
 }
 
@@ -88,7 +83,8 @@ export class ToolManager {
       supportsMcp: true,
       supportsSkills: true,
       supportsModelSelection: true,
-      supportedPlans: ['glm_coding_plan_global', 'glm_coding_plan_china', 'openrouter', 'lmstudio', 'alibaba', 'alibaba_api', 'zenmux'],
+      supportedPlans: ANTHROPIC_PLANS,
+      requiredProtocol: 'anthropic',
       notes: 'Requires Anthropic-compatible endpoints.',
     },
     opencode: {
@@ -141,7 +137,8 @@ export class ToolManager {
       supportsMcp: false,
       supportsSkills: false,
       supportsModelSelection: true,
-      supportedPlans: ALL_PLANS,
+      supportedPlans: OPENAI_PLANS,
+      requiredProtocol: 'openai',
       notes: 'Uses OpenAI-compatible provider config in ~/.codex/config.toml.',
     },
     mastra: {
@@ -157,8 +154,9 @@ export class ToolManager {
       supportsMcp: true,
       supportsSkills: false,
       supportsModelSelection: true,
-      supportedPlans: ['glm_coding_plan_global', 'glm_coding_plan_china', 'openrouter', 'lmstudio', 'alibaba', 'alibaba_api', 'zenmux'],
-      notes: 'Uses env vars OPENROUTER_API_URL and OPENROUTER_API_KEY at launch time. Config in ~/.ob1/settings.json.',
+      supportedPlans: OPENAI_PLANS,
+      requiredProtocol: 'openai',
+      notes: 'Uses OpenAI-compatible endpoint/key env vars at launch time. Config in ~/.ob1/settings.json.',
     },
   };
 
@@ -205,6 +203,8 @@ export class ToolManager {
 
   isPlanSupported(tool: string, plan: string): boolean {
     const caps = this.getCapabilities(tool);
+    if (!caps.supportsProviderConfig) return false;
+    if (caps.requiredProtocol) return supportsProtocol(plan as Plan, caps.requiredProtocol);
     return caps.supportedPlans.includes(plan as Plan);
   }
 

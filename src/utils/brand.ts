@@ -128,55 +128,41 @@ export function printConfigPathHint(path: string): void {
   console.log();
 }
 
+const PLAN_LABELS: Record<string, string> = {
+  glm_coding_plan_global: 'GLM Global',
+  glm_coding_plan_china: 'GLM China',
+  kimi: 'Kimi',
+  openrouter: 'OpenRouter',
+  nvidia: 'NVIDIA',
+  lmstudio: 'LM Studio',
+  alibaba: 'Alibaba Coding',
+  alibaba_api: 'Alibaba API (Singapore)',
+  zenmux: 'ZenMux',
+  xiaomi: 'Xiaomi SGP',
+};
+
+const PLAN_COLORS: Record<string, (s: string) => string> = {
+  glm_coding_plan_global: chalk.green,
+  glm_coding_plan_china: chalk.green,
+  kimi: chalk.hex('#00DFFF'),
+  openrouter: chalk.hex('#B388FF'),
+  nvidia: chalk.hex('#76B900'),
+  lmstudio: chalk.hex('#6AB0FF'),
+  alibaba: chalk.hex('#FF6A00'),
+  alibaba_api: chalk.hex('#FF8C42'),
+  zenmux: chalk.hex('#FF69B4'),
+  xiaomi: chalk.hex('#FF6900'),
+};
+
 export function planLabelColored(plan: string): string {
-  switch (plan) {
-    case 'glm_coding_plan_global':
-      return chalk.green('GLM Global');
-    case 'glm_coding_plan_china':
-      return chalk.green('GLM China');
-    case 'kimi':
-      return chalk.hex('#00DFFF')('Kimi');
-    case 'openrouter':
-      return chalk.hex('#B388FF')('OpenRouter');
-    case 'nvidia':
-      return chalk.hex('#76B900')('NVIDIA');
-    case 'lmstudio':
-      return chalk.hex('#6AB0FF')('LM Studio');
-    case 'alibaba':
-      return chalk.hex('#FF6A00')('Alibaba Coding');
-    case 'alibaba_api':
-      return chalk.hex('#FF8C42')('Alibaba API (SG)');
-    case 'zenmux':
-      return chalk.hex('#FF69B4')('ZenMux');
-    default:
-      return chalk.white(plan);
-  }
+  const label = PLAN_LABELS[plan] || plan;
+  const colorFn = PLAN_COLORS[plan] || chalk.white;
+  return colorFn(label);
 }
 
 export function planLabel(plan: string | undefined): string {
   if (!plan) return 'Not set';
-  switch (plan) {
-    case 'glm_coding_plan_global':
-      return 'GLM Global';
-    case 'glm_coding_plan_china':
-      return 'GLM China';
-    case 'kimi':
-      return 'Kimi';
-    case 'openrouter':
-      return 'OpenRouter';
-    case 'nvidia':
-      return 'NVIDIA';
-    case 'lmstudio':
-      return 'LM Studio';
-    case 'alibaba':
-      return 'Alibaba Coding';
-    case 'alibaba_api':
-      return 'Alibaba API (Singapore)';
-    case 'zenmux':
-      return 'ZenMux';
-    default:
-      return plan;
-  }
+  return PLAN_LABELS[plan] || plan;
 }
 
 export function maskApiKey(apiKey: string | undefined): string {
@@ -186,31 +172,21 @@ export function maskApiKey(apiKey: string | undefined): string {
   return `${trimmed.slice(0, 4)}****`;
 }
 
+const TOOL_LABELS: Record<string, string> = {
+  'claude-code': 'Claude Code',
+  opencode: 'OpenCode',
+  crush: 'Crush',
+  'factory-droid': 'Factory Droid',
+  ob1: 'OB1 CLI',
+  kimi: 'Kimi (native)',
+  amp: 'AMP Code',
+  pi: 'Pi CLI',
+  codex: 'Codex CLI',
+  mastra: 'Mastra Code',
+};
+
 export function toolLabel(tool: string): string {
-  switch (tool) {
-    case 'claude-code':
-      return 'Claude Code';
-    case 'opencode':
-      return 'OpenCode';
-    case 'crush':
-      return 'Crush';
-    case 'factory-droid':
-      return 'Factory Droid';
-    case 'ob1':
-      return 'OB1 CLI';
-    case 'kimi':
-      return 'Kimi (native)';
-    case 'amp':
-      return 'AMP Code';
-    case 'pi':
-      return 'Pi CLI';
-    case 'codex':
-      return 'Codex CLI';
-    case 'mastra':
-      return 'Mastra Code';
-    default:
-      return tool;
-  }
+  return TOOL_LABELS[tool] || tool;
 }
 
 /**
@@ -221,9 +197,3 @@ export function statusIndicator(configured: boolean): string {
   return configured ? chalk.green('●') : chalk.gray('○');
 }
 
-/**
- * Status indicator with partial state.
- */
-export function statusIndicatorPartial(partial: boolean): string {
-  return chalk.yellow('◐');
-}

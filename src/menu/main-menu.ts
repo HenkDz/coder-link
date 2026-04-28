@@ -9,7 +9,7 @@ import { printSplash, printStatusBar, printNavigationHints, printConfigPathHint 
 import { printError, printSuccess, printInfo } from '../utils/output.js';
 import { providerMenu } from './provider-menu.js';
 import { toolSelectMenu } from './tool-menu.js';
-import { skillsMenu, globalMcpMenu } from './skills-menu.js';
+import { globalMcpMenu } from './mcp-menu.js';
 import { diagnosticsMenu, logsMenu } from './system-menu.js';
 import { initMenuTerminalGuards, providerSummary, pause } from './shared.js';
 
@@ -22,8 +22,9 @@ export async function runMenu(): Promise<void> {
   printConfigPathHint(configManager.configPath);
   await new Promise((r) => setTimeout(r, 400));
 
+  let first = true;
   while (true) {
-    console.clear();
+    if (first) { console.clear(); first = false; }
     printSplash();
     const auth = configManager.getAuth();
     printStatusBar(auth.plan, auth.apiKey, auth.plan ? providerSummary(auth.plan as Plan).trim() : undefined);
@@ -35,14 +36,13 @@ export async function runMenu(): Promise<void> {
     }
 
     const mainChoices = [
-      { name: '1) ⚡ Provider Setup', value: 'provider' },
-      { name: '2) 🛠 Coding Tools', value: 'tools' },
-      { name: '3) � Agent Skills', value: 'skills' },
-      { name: '4) 🔌 MCP Servers', value: 'mcp' },
-      { name: '5) 🌐 Language', value: 'lang' },
+      { name: '1) Provider Setup', value: 'provider' },
+      { name: '2) Coding Tools', value: 'tools' },
+      { name: '3) MCP Servers', value: 'mcp' },
+      { name: '4) Language', value: 'lang' },
       new inquirer.Separator(),
-      { name: '6) 🔬 System Diagnostics', value: 'doctor' },
-      { name: '7) 📋 View Logs', value: 'logs' },
+      { name: '5) System Diagnostics', value: 'doctor' },
+      { name: '6) View Logs', value: 'logs' },
       new inquirer.Separator(),
       { name: chalk.gray('Exit'), value: 'exit' },
     ];
@@ -66,8 +66,6 @@ export async function runMenu(): Promise<void> {
         await providerMenu();
       } else if (op === 'tools') {
         await toolSelectMenu();
-      } else if (op === 'skills') {
-        await skillsMenu();
       } else if (op === 'mcp') {
         await globalMcpMenu();
       } else if (op === 'doctor') {
@@ -81,7 +79,7 @@ export async function runMenu(): Promise<void> {
             name: 'lang',
             message: 'Select language:',
             choices: [
-              { name: '简体中文', value: 'zh_CN' },
+              { name: '\u7B80\u4F53\u4E2D\u6587', value: 'zh_CN' },
               { name: 'English', value: 'en_US' },
             ],
             default: configManager.getLang(),
@@ -89,7 +87,7 @@ export async function runMenu(): Promise<void> {
         ]);
         configManager.setLang(lang);
         i18n.setLang(lang);
-        printSuccess(`Language set to ${lang === 'zh_CN' ? '简体中文' : 'English'}`);
+        printSuccess('Language set to ' + (lang === 'zh_CN' ? '\u7B80\u4F53\u4E2D\u6587' : 'English'));
         await pause();
       }
     } catch (error) {
@@ -99,4 +97,3 @@ export async function runMenu(): Promise<void> {
     }
   }
 }
-

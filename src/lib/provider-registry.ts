@@ -227,6 +227,22 @@ export const PROVIDER_CONFIGS: Record<Plan, ProviderConfig> = {
     maxContextSize: 256000,
     maxOutputTokens: 32000,
   },
+
+  xiaomi: {
+    id: 'xiaomi',
+    displayName: 'Xiaomi Token Plan (Singapore)',
+    shortName: 'Xiaomi_SGP',
+    urls: {
+      openai: 'https://token-plan-sgp.xiaomimimo.com/v1',
+      anthropic: 'https://token-plan-sgp.xiaomimimo.com/anthropic',
+    },
+    defaultModel: 'mimo-v2.5-pro',
+    commonModels: ['mimo-v2.5-pro'],
+    detectionPatterns: ['token-plan-sgp.xiaomimimo.com', 'xiaomimimo.com'],
+    supportsThinking: true,
+    maxContextSize: 128000,
+    maxOutputTokens: 131072,
+  },
 };
 
 // ============================================================================
@@ -287,6 +303,21 @@ export function detectPlanFromUrl(baseUrl: string): Plan | null {
  */
 export function getDefaultModel(plan: Plan): string {
   return PROVIDER_CONFIGS[plan].defaultModel;
+}
+
+/**
+ * Normalize provider-specific model aliases/casing.
+ */
+export function normalizeProviderModel(plan: Plan, model?: string): string | undefined {
+  const trimmed = model?.trim();
+  if (!trimmed) return trimmed;
+
+  if (plan === 'xiaomi') {
+    const lower = trimmed.toLowerCase();
+    if (lower === 'mimo-v2.5-pro' || lower === 'mimo-v2.5') return 'mimo-v2.5-pro';
+  }
+
+  return trimmed;
 }
 
 /**
@@ -382,6 +413,9 @@ function normalizeProviderUrl(url: string, plan: Plan, protocol: Protocol): stri
     case 'zenmux':
       return normalizeZenMuxUrl(normalized, lower, protocol, config);
 
+    case 'xiaomi':
+      return normalizeXiaomiUrl(normalized, lower, protocol, config);
+
     default:
       return normalized;
   }
@@ -464,16 +498,30 @@ function normalizeZenMuxUrl(
 }
 
 /**
- * Resolve the effective base URL, handling user overrides and URL normalization
- * @deprecated Use resolveProviderBaseUrl instead for better protocol-agnostic handling
+ * Normalize Xiaomi Token Plan URLs
  */
-export function resolveBaseUrl(
-  plan: Plan,
+function normalizeXiaomiUrl(
+  normalized: string,
+  lower: string,
   protocol: Protocol,
-  options?: { baseUrl?: string; anthropicBaseUrl?: string }
+  config: ProviderConfig
 ): string {
-  // Delegate to the new protocol-agnostic resolver
-  return resolveProviderBaseUrl(plan, protocol, options);
+  if (protocol === 'anthropic') {
+    if (lower.endsWith('/anthropic')) return normalized;
+    if (lower.endsWith('/v1')) {
+      return normalized.replace(/\/v1$/i, '/anthropic');
+    }
+    return config.urls.anthropic || normalized;
+  }
+
+  if (protocol === 'openai') {
+    if (lower.endsWith('/v1')) return normalized;
+    if (lower.endsWith('/anthropic')) {
+      return normalized.replace(/\/anthropic$/i, '/v1');
+    }
+  }
+
+  return normalized;
 }
 
 /**

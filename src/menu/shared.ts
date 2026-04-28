@@ -59,31 +59,16 @@ export function providerSummary(plan: Plan | undefined): string {
   return parts.length ? chalk.gray(` (${parts.join(' · ')})`) : '';
 }
 
+const TOOL_COMMANDS: Record<string, string> = {
+  'claude-code': 'claude',
+  'mastra': 'mastracode',
+};
+
 export function startCommand(tool: string): { cmd: string; args: string[] } {
-  switch (tool) {
-    case 'claude-code':
-      return { cmd: 'claude', args: [] };
-    case 'opencode':
-      return { cmd: 'opencode', args: [] };
-    case 'crush':
-      return { cmd: 'crush', args: [] };
-    case 'factory-droid':
-      return commandExists('droid') ? { cmd: 'droid', args: [] } : { cmd: 'factory', args: [] };
-    case 'kimi':
-      return { cmd: 'kimi', args: [] };
-    case 'amp':
-      return { cmd: 'amp', args: [] };
-    case 'pi':
-      return { cmd: 'pi', args: [] };
-    case 'codex':
-      return { cmd: 'codex', args: [] };
-    case 'mastra':
-      return { cmd: 'mastracode', args: [] };
-    case 'ob1':
-      return { cmd: 'ob1', args: [] };
-    default:
-      return { cmd: tool, args: [] };
+  if (tool === 'factory-droid') {
+    return commandExists('droid') ? { cmd: 'droid', args: [] } : { cmd: 'factory', args: [] };
   }
+  return { cmd: TOOL_COMMANDS[tool] || tool, args: [] };
 }
 
 function openUrlCommand(url: string): string {
@@ -119,18 +104,13 @@ export function installHint(tool: string): { label: string; command?: string } {
   }
 }
 
-export async function pause(message = 'Press Enter to continue... (or q to quit)'): Promise<void> {
+export async function pause(message = 'Press Enter to continue...'): Promise<void> {
   return new Promise((resolve) => {
     console.log(chalk.gray(`  ${message}`));
     if (process.stdin.isTTY) process.stdin.resume();
 
     const onData = (data: Buffer | string) => {
       cleanup();
-      const str = data.toString().trim();
-      if (str === 'q' || str === 'Q') {
-        console.log(chalk.gray('\n  Goodbye!\n'));
-        process.exit(0);
-      }
       resolve();
     };
 
@@ -162,9 +142,12 @@ export function createSafeSpinner(text: string): Ora {
 }
 
 export function getProviderIncompatibility(tool: string, plan: Plan): string | null {
+  const caps = toolManager.getCapabilities(tool);
+  if (!caps.supportsProviderConfig) return 'Launch-only tool; provider is not managed by Coder Link';
   if (toolManager.isPlanSupported(tool, plan)) return null;
-  if (tool === 'claude-code') return 'Requires Anthropic-compatible API';
-  return 'Unsupported by this tool';
+  if (caps.requiredProtocol === 'anthropic') return 'Requires an Anthropic-compatible endpoint';
+  if (caps.requiredProtocol === 'openai') return 'Requires an OpenAI-compatible endpoint';
+  return caps.notes || 'Unsupported by this tool';
 }
 
 export async function selectModelId(plan: Plan, currentModel?: string): Promise<string | '__back'> {

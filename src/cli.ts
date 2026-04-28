@@ -7,6 +7,7 @@ import { i18n } from './utils/i18n.js';
 import { configManager } from './utils/config.js';
 import { toolManager } from './lib/tool-manager.js';
 import type { ToolName } from './lib/tool-manager.js';
+import type { Plan } from './utils/config.js';
 import { runMenu } from './menu/main-menu.js';
 import { runWizard } from './wizard.js';
 import { statusIndicator, planLabel, planLabelColored, toolLabel } from './utils/brand.js';
@@ -302,217 +303,16 @@ program
 
 // Auth commands program
 program
-  .command('auth')
-  .description('API key management')
-  .action(async () => {
-    // Interactive mode if no subcommand provided
-    await runWizard();
-  })
-  .addCommand(new Command('glm_coding_plan_global [token]')
-    .description('Set GLM Coding Plan Global API key')
-    .action(async (token?: string) => {
-      try {
-        if (!token) {
-          const { apiKey } = await inquirer.prompt<{ apiKey: string }>([{
-            type: 'password',
-            name: 'apiKey',
-            message: i18n.t('wizard.enter_api_key'),
-            validate: (input: string) => input.trim().length > 0 || 'API key cannot be empty'
-          }]);
-          token = apiKey;
-        }
-        configManager.setAuth('glm_coding_plan_global', token.trim());
-        console.log(i18n.t('auth.set_success'));
-      } catch (error) {
-        logger.logError('auth.set', error);
-        printError(
-          error instanceof Error ? error.message : String(error),
-          'Run "coder-link auth" for interactive setup'
-        );
-        process.exit(1);
+  .command('auth [provider] [token]')
+  .description(`API key management. Providers: ${PROVIDER_PLAN_VALUES.join(', ')}`)
+  .action(async (provider?: string, token?: string) => {
+    try {
+      if (!provider) {
+        await runWizard();
+        return;
       }
-    })
-  )
-  .addCommand(new Command('glm_coding_plan_china [token]')
-    .description('Set GLM Coding Plan China API key')
-    .action(async (token?: string) => {
-      try {
-        if (!token) {
-          const { apiKey } = await inquirer.prompt<{ apiKey: string }>([{
-            type: 'password',
-            name: 'apiKey',
-            message: i18n.t('wizard.enter_api_key'),
-            validate: (input: string) => input.trim().length > 0 || 'API key cannot be empty'
-          }]);
-          token = apiKey;
-        }
-        configManager.setAuth('glm_coding_plan_china', token.trim());
-        console.log(i18n.t('auth.set_success'));
-      } catch (error) {
-        logger.logError('auth.set', error);
-        printError(
-          error instanceof Error ? error.message : String(error),
-          'Run "coder-link auth" for interactive setup'
-        );
-        process.exit(1);
-      }
-    })
-  )
-  .addCommand(new Command('kimi [token]')
-    .description('Set Kimi API key')
-    .action(async (token?: string) => {
-      try {
-        if (!token) {
-          const { apiKey } = await inquirer.prompt<{ apiKey: string }>([{
-            type: 'password',
-            name: 'apiKey',
-            message: i18n.t('wizard.enter_api_key'),
-            validate: (input: string) => input.trim().length > 0 || 'API key cannot be empty'
-          }]);
-          token = apiKey;
-        }
-        configManager.setAuth('kimi', token.trim());
-        console.log(i18n.t('auth.set_success'));
-      } catch (error) {
-        logger.logError('auth.set', error);
-        printError(
-          error instanceof Error ? error.message : String(error),
-          'Run "coder-link auth" for interactive setup'
-        );
-        process.exit(1);
-      }
-    })
-  )
-  .addCommand(new Command('openrouter [token]')
-    .description('Set OpenRouter API key')
-    .action(async (token?: string) => {
-      try {
-        if (!token) {
-          const { apiKey } = await inquirer.prompt<{ apiKey: string }>([{
-            type: 'password',
-            name: 'apiKey',
-            message: i18n.t('wizard.enter_api_key'),
-            validate: (input: string) => input.trim().length > 0 || 'API key cannot be empty'
-          }]);
-          token = apiKey;
-        }
-        configManager.setAuth('openrouter', token.trim());
-        console.log(i18n.t('auth.set_success'));
-      } catch (error) {
-        logger.logError('auth.set', error);
-        printError(
-          error instanceof Error ? error.message : String(error),
-          'Run "coder-link auth" for interactive setup'
-        );
-        process.exit(1);
-      }
-    })
-  )
-  .addCommand(new Command('nvidia [token]')
-    .description('Set NVIDIA API key')
-    .action(async (token?: string) => {
-      try {
-        if (!token) {
-          const { apiKey } = await inquirer.prompt<{ apiKey: string }>([{
-            type: 'password',
-            name: 'apiKey',
-            message: i18n.t('wizard.enter_api_key'),
-            validate: (input: string) => input.trim().length > 0 || 'API key cannot be empty'
-          }]);
-          token = apiKey;
-        }
-        configManager.setAuth('nvidia', token.trim());
-        console.log(i18n.t('auth.set_success'));
-      } catch (error) {
-        logger.logError('auth.set', error);
-        printError(
-          error instanceof Error ? error.message : String(error),
-          'Run "coder-link auth" for interactive setup'
-        );
-        process.exit(1);
-      }
-    })
-  )
-  .addCommand(new Command('alibaba [token]')
-    .description('Set Alibaba Coding Plan API key (monthly plan)')
-    .action(async (token?: string) => {
-      try {
-        if (!token) {
-          const { apiKey } = await inquirer.prompt<{ apiKey: string }>([{
-            type: 'password',
-            name: 'apiKey',
-            message: i18n.t('wizard.enter_api_key'),
-            validate: (input: string) => input.trim().length > 0 || 'API key cannot be empty'
-          }]);
-          token = apiKey;
-        }
-        configManager.setAuth('alibaba', token.trim());
-        console.log(i18n.t('auth.set_success'));
-      } catch (error) {
-        logger.logError('auth.set', error);
-        printError(
-          error instanceof Error ? error.message : String(error),
-          'Run "coder-link auth" for interactive setup'
-        );
-        process.exit(1);
-      }
-    })
-  )
-  .addCommand(new Command('alibaba_api [token]')
-    .description('Set Alibaba Model Studio API key (Singapore endpoint)')
-    .alias('alibaba-api')
-    .action(async (token?: string) => {
-      try {
-        if (!token) {
-          const { apiKey } = await inquirer.prompt<{ apiKey: string }>([{
-            type: 'password',
-            name: 'apiKey',
-            message: i18n.t('wizard.enter_api_key'),
-            validate: (input: string) => input.trim().length > 0 || 'API key cannot be empty'
-          }]);
-          token = apiKey;
-        }
-        configManager.setAuth('alibaba_api', token.trim());
-        console.log(i18n.t('auth.set_success'));
-      } catch (error) {
-        logger.logError('auth.set', error);
-        printError(
-          error instanceof Error ? error.message : String(error),
-          'Run "coder-link auth" for interactive setup'
-        );
-        process.exit(1);
-      }
-    })
-  )
-  .addCommand(new Command('lmstudio [token]')
-    .description('Set LM Studio API key (optional for local use)')
-    .action(async (token?: string) => {
-      try {
-        if (!token) {
-          const { apiKey } = await inquirer.prompt<{ apiKey: string }>([{
-            type: 'password',
-            name: 'apiKey',
-            message: `${i18n.t('wizard.enter_api_key')} (leave empty for local LM Studio)`,
-          }]);
-          token = apiKey;
-        }
-        const normalized = token.trim() || 'lmstudio';
-        configManager.setAuth('lmstudio', normalized);
-        console.log(i18n.t('auth.set_success'));
-      } catch (error) {
-        logger.logError('auth.set', error);
-        printError(
-          error instanceof Error ? error.message : String(error),
-          'Run "coder-link auth" for interactive setup'
-        );
-        process.exit(1);
-      }
-    })
-  )
-  .addCommand(new Command('revoke')
-    .description('Delete saved API key')
-    .action(async () => {
-      try {
+
+      if (provider === 'revoke') {
         const { confirm } = await inquirer.prompt<{ confirm: boolean }>([{
           type: 'confirm',
           name: 'confirm',
@@ -525,21 +325,13 @@ program
         }
         configManager.revokeAuth();
         console.log(i18n.t('auth.revoke_success'));
-      } catch (error) {
-        logger.logError('auth.revoke', error);
-        printError(
-          error instanceof Error ? error.message : String(error),
-          'Manually delete ~/.coder-link/config.yaml if persistent issues'
-        );
-        process.exit(1);
+        return;
       }
-    })
-  )
-  .addCommand(new Command('reload <tool>')
-    .description('Reload configuration into a tool')
-    .action(async (tool: string) => {
-      try {
+
+      if (provider === 'reload') {
+        const tool = token;
         const { plan, apiKey } = configManager.getAuth();
+        if (!tool) throw new Error('Usage: coder-link auth reload <tool>');
         if (!plan || !apiKey) {
           printError(
             i18n.t('auth.not_set'),
@@ -549,16 +341,37 @@ program
         }
         await toolManager.loadConfig(tool, plan, apiKey);
         console.log(i18n.t('auth.reload_success', { tool }));
-      } catch (error) {
-        logger.logError('auth.reload', error);
-        printError(
-          error instanceof Error ? error.message : String(error),
-          `Check if "${tool}" is supported and installed`
-        );
-        process.exit(1);
+        return;
       }
-    })
-  );
+
+      const normalizedProvider = provider === 'alibaba-api' ? 'alibaba_api' : provider;
+      if (!PROVIDER_PLAN_VALUES.includes(normalizedProvider as Plan)) {
+        throw new Error(`Unknown provider: ${provider}. Available providers: ${PROVIDER_PLAN_VALUES.join(', ')}`);
+      }
+
+      const plan = normalizedProvider as Plan;
+      const isLocalProvider = plan === 'lmstudio';
+      if (!token) {
+        const { apiKey } = await inquirer.prompt<{ apiKey: string }>([{
+          type: 'password',
+          name: 'apiKey',
+          message: i18n.t('wizard.enter_api_key') + (isLocalProvider ? ' (leave empty for local LM Studio)' : ''),
+          ...(isLocalProvider ? {} : { validate: (input: string) => input.trim().length > 0 || 'API key cannot be empty' }),
+        }]);
+        token = apiKey;
+      }
+
+      configManager.setAuth(plan, token.trim() || (isLocalProvider ? 'lmstudio' : ''));
+      console.log(i18n.t('auth.set_success'));
+    } catch (error) {
+      logger.logError('auth', error);
+      printError(
+        error instanceof Error ? error.message : String(error),
+        'Run "coder-link auth" for interactive setup'
+      );
+      process.exit(1);
+    }
+  });
 
 // Tool management commands
 program
@@ -692,10 +505,6 @@ async function mcpInstallFlow(mcpTools: ToolName[], auth: { plan: string | undef
   }
 
   const mcpsToInstall = selectedMcps.filter((id): id is string => id !== '__back');
-  
-  if (mcpsToInstall.length === 0) {
-    return BACK_SIGNAL;
-  }
 
   // Check auth for services that require it
   const servicesRequiringAuth = mcpsToInstall.filter((id) => {
@@ -864,10 +673,6 @@ async function mcpUninstallFlow(mcpTools: ToolName[]): Promise<typeof BACK_SIGNA
   }
 
   const mcpsToUninstall = selectedMcps.filter((id): id is string => id !== '__back');
-  
-  if (mcpsToUninstall.length === 0) {
-    return BACK_SIGNAL;
-  }
 
   // Step 3: Select target (with back option)
   const { target } = await inquirer.prompt<{ target: ToolName | 'all' | '__back' }>([
@@ -1226,18 +1031,8 @@ program
       const toolAliases: Record<string, string> = {
         'droid': 'factory-droid',
         'factory': 'factory-droid',
-        'factory-droid': 'factory-droid',
         'claude': 'claude-code',
-        'claude-code': 'claude-code',
-        'opencode': 'opencode',
-        'crush': 'crush',
-        'kimi': 'kimi',
-        'amp': 'amp',
-        'pi': 'pi',
-        'codex': 'codex',
-        'mastra': 'mastra',
         'mastracode': 'mastra',
-        'ob1': 'ob1',
       };
 
       const normalizedTool = toolAliases[tool.toLowerCase()] || tool.toLowerCase();

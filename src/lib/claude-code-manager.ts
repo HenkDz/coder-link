@@ -141,8 +141,8 @@ export class ClaudeCodeManager {
         ...cleanedEnv,
         // GLM/ZenMux use AUTH_TOKEN, other providers use API_KEY
         [authKeyEnv]: apiKey,
-        // Explicitly clear ANTHROPIC_API_KEY to avoid conflicts (per ZenMux docs)
-        ANTHROPIC_API_KEY: '',
+        // Only clear ANTHROPIC_API_KEY when using AUTH_TOKEN to avoid conflicts
+        ...(authKeyEnv === 'ANTHROPIC_AUTH_TOKEN' ? { ANTHROPIC_API_KEY: '' } : {}),
         ANTHROPIC_BASE_URL: baseUrl,
         // Model configuration - set all three tiers
         ANTHROPIC_DEFAULT_OPUS_MODEL: defaultModels.opus,

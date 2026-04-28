@@ -12,6 +12,7 @@ import { startCommand } from '../menu/shared.js';
 import { printError, printWarning, printInfo, printSuccess } from '../utils/output.js';
 import { planLabel } from '../utils/brand.js';
 import { supportsOpenAIProtocol } from '../utils/providers.js';
+import { getProviderIncompatibility } from '../menu/shared.js';
 
 export interface RunToolOptions {
   /** Launch in a new terminal window (Windows only for now) */
@@ -228,24 +229,7 @@ async function launchCodex(
     return { success: false, error: 'No API key' };
   }
 
-  const codexEnv: Record<string, string> = {
-    OPENAI_API_KEY: apiKey,
-  };
-
-  if (launchMode === 'new') {
-    const ok = runInNewTerminal(start.cmd, start.args, codexEnv);
-    if (!ok) {
-      if (options.nonInteractive) {
-        return { success: false, error: 'Failed to open new terminal window' };
-      }
-      const exitCode = await runInteractiveWithEnv(start.cmd, start.args, codexEnv);
-      return { success: true, exitCode };
-    }
-    return { success: true };
-  }
-
-  const exitCode = await runInteractiveWithEnv(start.cmd, start.args, codexEnv);
-  return { success: true, exitCode };
+  return launchWithEnv(start, launchMode, { OPENAI_API_KEY: apiKey }, options);
 }
 
 async function launchFactoryDroid(
@@ -254,30 +238,16 @@ async function launchFactoryDroid(
   launchMode: 'same' | 'new',
   options: RunToolOptions
 ): Promise<RunToolResult> {
-  let factoryKey = configManager.getFactoryApiKey() || process.env.FACTORY_API_KEY;
+  const factoryKey = configManager.getFactoryApiKey() || process.env.FACTORY_API_KEY;
   if (!factoryKey) {
     if (options.nonInteractive) {
       return { success: false, error: 'Factory API key required. Set FACTORY_API_KEY env var or configure in coder-link.' };
     }
-    // In non-interactive mode we can't prompt, so fail
     printError('Factory API key required.', 'Set FACTORY_API_KEY env var or run "coder-link init" to configure.');
     return { success: false, error: 'Factory API key required' };
   }
 
-  if (launchMode === 'new') {
-    const ok = runInNewTerminal(start.cmd, start.args, { FACTORY_API_KEY: factoryKey });
-    if (!ok) {
-      if (options.nonInteractive) {
-        return { success: false, error: 'Failed to open new terminal window' };
-      }
-      const exitCode = await runInteractiveWithEnv(start.cmd, start.args, { FACTORY_API_KEY: factoryKey });
-      return { success: true, exitCode };
-    }
-    return { success: true };
-  }
-
-  const exitCode = await runInteractiveWithEnv(start.cmd, start.args, { FACTORY_API_KEY: factoryKey });
-  return { success: true, exitCode };
+  return launchWithEnv(start, launchMode, { FACTORY_API_KEY: factoryKey }, options);
 }
 
 async function launchOb1(
@@ -286,8 +256,8 @@ async function launchOb1(
   launchMode: 'same' | 'new',
   options: RunToolOptions
 ): Promise<RunToolResult> {
-  let ob1ApiUrl = configManager.getOb1ApiUrl() || process.env.OPENROUTER_API_URL;
-  let ob1ApiKey = configManager.getOb1ApiKey() || process.env.OPENROUTER_API_KEY;
+  const ob1ApiUrl = configManager.getOb1ApiUrl() || process.env.OPENROUTER_API_URL;
+  const ob1ApiKey = configManager.getOb1ApiKey() || process.env.OPENROUTER_API_KEY;
 
   if (!ob1ApiUrl || !ob1ApiKey) {
     const msg = 'OB1 requires OPENROUTER_API_URL and OPENROUTER_API_KEY.';
@@ -302,24 +272,27 @@ async function launchOb1(
   if (ob1ApiUrl) ob1Env.OPENROUTER_API_URL = ob1ApiUrl;
   if (ob1ApiKey) ob1Env.OPENROUTER_API_KEY = ob1ApiKey;
 
+  return launchWithEnv(start, launchMode, ob1Env, options);
+}
+
+async function launchWithEnv(
+  start: { cmd: string; args: string[] },
+  launchMode: 'same' | 'new',
+  env: Record<string, string>,
+  options: RunToolOptions
+): Promise<RunToolResult> {
   if (launchMode === 'new') {
-    const ok = runInNewTerminal(start.cmd, start.args, ob1Env);
+    const ok = runInNewTerminal(start.cmd, start.args, env);
     if (!ok) {
       if (options.nonInteractive) {
         return { success: false, error: 'Failed to open new terminal window' };
       }
-      const exitCode = await runInteractiveWithEnv(start.cmd, start.args, ob1Env);
+      const exitCode = await runInteractiveWithEnv(start.cmd, start.args, env);
       return { success: true, exitCode };
     }
     return { success: true };
   }
-
-  const exitCode = await runInteractiveWithEnv(start.cmd, start.args, ob1Env);
+  const exitCode = await runInteractiveWithEnv(start.cmd, start.args, env);
   return { success: true, exitCode };
 }
 
-function getProviderIncompatibility(tool: string, plan: Plan): string | null {
-  if (toolManager.isPlanSupported(tool, plan)) return null;
-  if (tool === 'claude-code') return 'Requires Anthropic-compatible API';
-  return 'Unsupported by this tool';
-}

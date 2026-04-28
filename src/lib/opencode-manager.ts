@@ -203,10 +203,33 @@ export class OpenCodeManager {
     this.saveConfig(currentConfig);
   }
 
+  private static readonly PROVIDER_PLAN_MAP: Array<{ key: string; plan: string; detectPlan?: (provider: any) => string }> = [
+    { key: 'zai-coding-plan', plan: 'glm_coding_plan_global' },
+    { key: 'zhipuai-coding-plan', plan: 'glm_coding_plan_china' },
+    { key: 'moonshot-ai-coding', plan: 'kimi' },
+    { key: 'kimi-custom', plan: 'kimi' },
+    { key: 'nvidia', plan: 'nvidia' },
+    { key: 'openrouter', plan: 'openrouter' },
+    { key: 'lmstudio', plan: 'lmstudio' },
+    { key: 'alibaba', plan: 'alibaba', detectPlan: (p) => {
+      const baseUrl = p.options?.baseURL || '';
+      return typeof baseUrl === 'string' && baseUrl.includes('compatible-mode') ? 'alibaba_api' : 'alibaba';
+    }},
+    { key: 'alibaba_api', plan: 'alibaba_api' },
+  ];
+
+  private static extractFirstModelId(provider: any): string | undefined {
+    const models = provider?.models;
+    if (models && typeof models === 'object') {
+      const ids = Object.keys(models);
+      if (ids.length > 0) return ids[0];
+    }
+    return undefined;
+  }
+
   async detectCurrentConfig(): Promise<{ plan: string | null; apiKey: string | null; model?: string }> {
     try {
       const config = this.getConfig();
-      // Check provider configuration
       if (!config.provider) {
         return { plan: null, apiKey: null };
       }
@@ -215,98 +238,19 @@ export class OpenCodeManager {
       let apiKey: string | null = null;
       let model: string | undefined = undefined;
 
-      if (config.provider['zai-coding-plan']) {
-        plan = 'glm_coding_plan_global';
-        apiKey = config.provider['zai-coding-plan'].options?.apiKey || null;
-      } else if (config.provider['zhipuai-coding-plan']) {
-        plan = 'glm_coding_plan_china';
-        apiKey = config.provider['zhipuai-coding-plan'].options?.apiKey || null;
-      } else if (config.provider['moonshot-ai-coding']) {
-        // Kimi native provider
-        plan = 'kimi';
-        apiKey = config.provider['moonshot-ai-coding'].options?.apiKey || null;
-      } else if (config.provider['kimi-custom']) {
-        // Kimi custom provider (OpenRouter or other endpoints)
-        plan = 'kimi';
-        apiKey = config.provider['kimi-custom'].options?.apiKey || null;
-        // Extract model from the models field if available
-        const models = config.provider['kimi-custom'].models;
-        if (models && typeof models === 'object') {
-          const modelIds = Object.keys(models);
-          if (modelIds.length > 0) {
-            model = modelIds[0];
-          }
-        }
-      } else if (config.provider['nvidia']) {
-        // NVIDIA custom provider
-        plan = 'nvidia';
-        apiKey = config.provider['nvidia'].options?.apiKey || null;
-        // Extract model from the models field if available
-        const models = config.provider['nvidia'].models;
-        if (models && typeof models === 'object') {
-          const modelIds = Object.keys(models);
-          if (modelIds.length > 0) {
-            model = modelIds[0];
-          }
-        }
-      } else if (config.provider['openrouter']) {
-        // OpenRouter custom provider
-        plan = 'openrouter';
-        apiKey = config.provider['openrouter'].options?.apiKey || null;
-        // Extract model from the models field if available
-        const models = config.provider['openrouter'].models;
-        if (models && typeof models === 'object') {
-          const modelIds = Object.keys(models);
-          if (modelIds.length > 0) {
-            model = modelIds[0];
-          }
-        }
-      } else if (config.provider['lmstudio']) {
-        // LM Studio custom provider
-        plan = 'lmstudio';
-        apiKey = config.provider['lmstudio'].options?.apiKey || null;
-        // Extract model from the models field if available
-        const models = config.provider['lmstudio'].models;
-        if (models && typeof models === 'object') {
-          const modelIds = Object.keys(models);
-          if (modelIds.length > 0) {
-            model = modelIds[0];
-          }
-        }
-      } else if (config.provider['alibaba']) {
-        // Alibaba coding plan custom provider
-        const baseUrl = config.provider['alibaba'].options?.baseURL || '';
-        plan = typeof baseUrl === 'string' && baseUrl.includes('compatible-mode') ? 'alibaba_api' : 'alibaba';
-        apiKey = config.provider['alibaba'].options?.apiKey || null;
-        const models = config.provider['alibaba'].models;
-        if (models && typeof models === 'object') {
-          const modelIds = Object.keys(models);
-          if (modelIds.length > 0) {
-            model = modelIds[0];
-          }
-        }
-      } else if (config.provider['alibaba_api']) {
-        // Alibaba API custom provider
-        plan = 'alibaba_api';
-        apiKey = config.provider['alibaba_api'].options?.apiKey || null;
-        const models = config.provider['alibaba_api'].models;
-        if (models && typeof models === 'object') {
-          const modelIds = Object.keys(models);
-          if (modelIds.length > 0) {
-            model = modelIds[0];
-          }
-        }
+      for (const entry of OpenCodeManager.PROVIDER_PLAN_MAP) {
+        const provider = config.provider[entry.key];
+        if (!provider) continue;
+        plan = entry.detectPlan ? entry.detectPlan(provider) : entry.plan;
+        apiKey = provider.options?.apiKey || null;
+        model = OpenCodeManager.extractFirstModelId(provider);
+        break;
       }
 
-      // Extract model from config if present
+      // Extract model from config if present (overrides provider-level model)
       if (config.model && typeof config.model === 'string') {
-        // Model format is typically "provider/model", extract the model part
         const parts = config.model.split('/');
-        if (parts.length > 1) {
-          model = parts.slice(1).join('/');
-        } else {
-          model = config.model;
-        }
+        model = parts.length > 1 ? parts.slice(1).join('/') : config.model;
       }
 
       return { plan, apiKey, model };

@@ -4,7 +4,7 @@ import chalk from 'chalk';
 import { configManager } from '../utils/config.js';
 import type { Plan } from '../utils/config.js';
 import { logger } from '../utils/logger.js';
-import { testAnthropicMessagesApi, testOpenAIChatCompletionsApi, testOpenAICompatibleApi, fetchOpenRouterModelInfo } from '../utils/api-test.js';
+import { testAnthropicMessagesApi, testOpenAIChatCompletionsApi, testOpenAICompatibleApi } from '../utils/api-test.js';
 import { printHeader, printStatusBar, printNavigationHints, printConfigPathHint, planLabel, maskApiKey } from '../utils/brand.js';
 import { printError, printSuccess, printWarning, printInfo } from '../utils/output.js';
 import {
@@ -84,8 +84,9 @@ async function manageProviderAvailability(): Promise<void> {
 }
 
 async function configureProfilesMenu(): Promise<void> {
+  let first=true;
   while (true) {
-    console.clear();
+    if(first){console.clear();first=false;}
     printHeader('Configure Profiles');
     printNavigationHints();
 
@@ -174,27 +175,11 @@ async function performProviderHealthCheck(
 }
 
 export async function providerSetupFlow(plan: Plan): Promise<void> {
-  printInfo(`Configuring ${planLabel(plan)} profile...`);
-  printInfo(`Protocols: ${providerProtocolSummary(plan)}`);
-  
-  // Display provider-specific hints
-  if (plan === 'lmstudio') {
-    const defaults = getConfigurableDefaults(plan);
-    if (defaults?.defaultPorts) {
-      printInfo(`Default ports: ${defaults.defaultPorts.join(', ')}`);
-    }
-    printInfo('Make sure LM Studio is running with a model loaded before testing.');
-  } else if (plan === 'alibaba') {
-    printInfo('Alibaba Coding Plan uses plan-specific key (sk-sp-*) and coding-intl endpoints.');
-  } else if (plan === 'alibaba_api') {
-    printInfo('Alibaba API (Singapore) supports OpenAI + Anthropic protocols.');
-    printInfo('Defaults: /compatible-mode/v1 (OpenAI) and /apps/anthropic (Anthropic).');
-  }
-  
-  console.log(chalk.gray("  (Tip: choose Quick Setup for most users)"));
-  console.log(chalk.gray("  (Enter 'b' at text prompts to go back)\n"));
+  console.log(chalk.cyan(`  Configuring ${planLabel(plan)}`));
+  console.log(chalk.gray(`  Protocols: ${providerProtocolSummary(plan)}`));
+  console.log();
 
-  // Perform health check for local providers (Recommendation #1)
+  // Health check for local providers
   if (requiresHealthCheck(plan)) {
     const currentSettings = configManager.getProviderSettings(plan);
     const healthResult = await performProviderHealthCheck(plan, currentSettings.baseUrl);
@@ -219,7 +204,6 @@ export async function providerSetupFlow(plan: Plan): Promise<void> {
         return;
       }
     } else if (healthResult.message) {
-      // Health check passed with a warning
       printWarning(healthResult.message);
     }
     
@@ -227,126 +211,100 @@ export async function providerSetupFlow(plan: Plan): Promise<void> {
   }
 
   const current = configManager.getProviderSettings(plan);
-  const { setupMode } = await inquirer.prompt<{ setupMode: 'quick' | 'advanced' | '__back' }>([
-    {
-      type: 'list',
-      name: 'setupMode',
-      message: 'Setup mode:',
-      choices: [
-        { name: 'Quick Setup (use current recommended endpoint/model)', value: 'quick' },
-        { name: 'Advanced Setup (edit endpoint/model/context)', value: 'advanced' },
-        new inquirer.Separator(),
-        { name: chalk.gray('← Back'), value: '__back' as const },
-      ],
-    },
-  ]);
-
-  if (setupMode === '__back') return;
-
   let openAiBaseUrl = current.baseUrl;
   let openAiModel = current.model || '';
   let maxContextSize = current.maxContextSize || suggestedContextSize(plan);
-
   let anthropicBaseUrl = current.anthropicBaseUrl || resolveAnthropicBaseUrl(plan, openAiBaseUrl) || '';
   let anthropicModel = current.anthropicModel || current.model || getDefaultAnthropicModel(plan) || '';
 
-  if (setupMode === 'advanced') {
-    const { base_url } = await inquirer.prompt<{ base_url: string }>([
-      {
-        type: 'input',
-        name: 'base_url',
-        message: `${planLabel(plan)} OpenAI-compatible Base URL:`,
-        default: openAiBaseUrl,
-        validate: (v: string) => v.trim().length > 0 || 'Base URL cannot be empty',
-      },
-    ]);
+  // Step 1: Select model
+  const selectedModel = await selectModelId(plan, openAiModel);
+  if (selectedModel === '__back') return;
+  openAiModel = selectedModel.trim();
 
-    if (base_url.trim().toLowerCase() === 'b') {
-      printInfo('Configuration cancelled');
-      return;
-    }
-    openAiBaseUrl = base_url.trim();
-
-    const selectedModel = await selectModelId(plan, openAiModel);
-    if (selectedModel === '__back') return providerSetupFlow(plan);
-    openAiModel = selectedModel.trim();
-
-    let fetchedContextInfo = '';
-    if (plan === 'openrouter') {
-      const existingKey = configManager.getApiKeyFor(plan);
-      if (existingKey) {
-        const spinner = createSafeSpinner('Fetching model info from OpenRouter...').start();
-        try {
-          const modelInfo = await fetchOpenRouterModelInfo({
-            apiKey: existingKey,
-            modelId: openAiModel,
-            timeoutMs: 8000,
-          });
-          if (modelInfo?.contextLength) {
-            maxContextSize = modelInfo.contextLength;
-            fetchedContextInfo = chalk.green(` (fetched: ${modelInfo.contextLength.toLocaleString()})`);
-            spinner.succeed(`Found model: ${modelInfo.name || modelInfo.id}`);
-          } else {
-            spinner.fail('Could not fetch context size from OpenRouter');
-          }
-        } catch {
-          spinner.fail('Failed to fetch model info from OpenRouter');
-        }
-      }
-    }
-
-    const { max_context_size_input } = await inquirer.prompt<{ max_context_size_input: string }>([
-      {
-        type: 'input',
-        name: 'max_context_size_input',
-        message: `Max context size${fetchedContextInfo}:`,
-        default: String(maxContextSize),
-        validate: (v: string) => {
-          if (v.trim().toLowerCase() === 'b') return true;
-          const n = Number(v);
-          return (Number.isInteger(n) && n > 0) || 'Enter a positive integer';
-        },
-      },
-    ]);
-
-    if (max_context_size_input.trim().toLowerCase() === 'b') return providerSetupFlow(plan);
-    maxContextSize = Number(max_context_size_input);
-  } else {
-    printInfo(`Using OpenAI-compatible endpoint: ${openAiBaseUrl}`);
-    printInfo(`Using OpenAI-compatible model: ${openAiModel}`);
-  }
-
+  // Auto-derive anthropic settings
   if (supportsAnthropicProtocol(plan)) {
-    const inferredAnthropicBase = resolveAnthropicBaseUrl(plan, openAiBaseUrl) || anthropicBaseUrl;
+    anthropicBaseUrl = anthropicBaseUrl || resolveAnthropicBaseUrl(plan, openAiBaseUrl) || '';
+    anthropicModel = anthropicModel || openAiModel || getDefaultAnthropicModel(plan) || '';
+  }
 
-    if (setupMode === 'advanced') {
-      printInfo('Anthropic-compatible settings are used by Claude Code.');
-      const { anthropic_base_url } = await inquirer.prompt<{ anthropic_base_url: string }>([
-        {
-          type: 'input',
-          name: 'anthropic_base_url',
-          message: `${planLabel(plan)} Anthropic-compatible Base URL (Claude Code):`,
-          default: anthropicBaseUrl || inferredAnthropicBase,
-          validate: (v: string) => v.trim().length > 0 || 'Base URL cannot be empty',
-        },
-      ]);
-      if (anthropic_base_url.trim().toLowerCase() === 'b') return providerSetupFlow(plan);
-      anthropicBaseUrl = anthropic_base_url.trim();
+  // Step 2: API key
+  const existingKey = configManager.getApiKeyFor(plan);
+  const isLocalProvider = plan === 'lmstudio';
+  const keyMsg = existingKey
+    ? `API key [current: ${maskApiKey(existingKey)}]${isLocalProvider ? ' (leave empty to keep)' : ' (leave empty to keep)'}:`
+    : `API key${isLocalProvider ? ' (optional)' : ''}:`;
 
-      const selectedAnthropicModel = await selectModelId(
-        plan,
-        anthropicModel || openAiModel || getDefaultAnthropicModel(plan)
+  const { apiKey } = await inquirer.prompt<{ apiKey: string }>([
+    {
+      type: 'password',
+      name: 'apiKey',
+      message: keyMsg,
+      mask: '*',
+      validate: (v: string) => {
+        if (v.trim().toLowerCase() === 'b') return true;
+        if (existingKey && v.trim().length === 0) return true;
+        if (isLocalProvider && v.trim().length === 0) return true;
+        return v.trim().length > 0 || 'API key cannot be empty';
+      },
+    },
+  ]);
+
+  if (apiKey.trim().toLowerCase() === 'b') return;
+  const finalKey = apiKey.trim() || (existingKey ?? (isLocalProvider ? 'lmstudio' : ''));
+
+  // Auto-detect Alibaba Coding Plan key
+  if (plan === 'alibaba' && finalKey.startsWith('sk-sp-')) {
+    openAiBaseUrl = 'https://coding-intl.dashscope.aliyuncs.com/v1';
+    openAiModel = 'qwen3-coder-plus';
+    anthropicBaseUrl = 'https://coding-intl.dashscope.aliyuncs.com/apps/anthropic';
+    anthropicModel = 'qwen3-coder-plus';
+  }
+  if (plan === 'alibaba_api') {
+    if (finalKey.startsWith('sk-sp-')) {
+      printWarning(
+        'Detected a Coding Plan key (sk-sp-*) under Alibaba API profile.',
+        'Use "Alibaba Coding Plan (Monthly)" profile for best compatibility.'
       );
-      if (selectedAnthropicModel === '__back') return providerSetupFlow(plan);
-      anthropicModel = selectedAnthropicModel.trim();
-    } else {
-      anthropicBaseUrl = anthropicBaseUrl || inferredAnthropicBase;
-      anthropicModel = anthropicModel || openAiModel || getDefaultAnthropicModel(plan) || '';
-      if (anthropicBaseUrl) printInfo(`Auto-derived Claude Code endpoint: ${anthropicBaseUrl}`);
-      if (anthropicModel) printInfo(`Claude Code model: ${anthropicModel}`);
+    }
+    if (!openAiBaseUrl || !openAiBaseUrl.includes('dashscope-intl.aliyuncs.com')) {
+      openAiBaseUrl = 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1';
+      openAiModel = openAiModel || 'qwen3-max-2026-01-23';
     }
   }
 
+  // Step 3: Confirmation summary
+  console.log();
+  console.log(chalk.cyan('  Configuration Summary:'));
+  console.log(chalk.gray(`  OpenAI Endpoint   : ${openAiBaseUrl}`));
+  console.log(chalk.gray(`  OpenAI Model      : ${openAiModel}`));
+  console.log(chalk.gray(`  Context Size      : ${maxContextSize.toLocaleString()}`));
+  if (supportsAnthropicProtocol(plan) && anthropicBaseUrl) {
+    console.log(chalk.gray(`  Anthropic Endpoint: ${anthropicBaseUrl}`));
+    console.log(chalk.gray(`  Anthropic Model   : ${anthropicModel}`));
+  }
+  console.log(chalk.gray(`  API Key           : ${maskApiKey(finalKey)}`));
+  console.log();
+
+  const { confirm } = await inquirer.prompt<{ confirm: boolean }>([
+    {
+      type: 'list',
+      name: 'confirm',
+      message: 'Save this configuration?',
+      choices: [
+        { name: 'Yes, save', value: true },
+        { name: 'No, cancel', value: false },
+      ],
+      default: true,
+    },
+  ]);
+
+  if (!confirm) {
+    printInfo('Configuration cancelled');
+    return;
+  }
+
+  // Save
   const profile: {
     base_url?: string;
     model?: string;
@@ -365,74 +323,9 @@ export async function providerSetupFlow(plan: Plan): Promise<void> {
   }
 
   configManager.setProviderProfile(plan, profile);
-
-  const existingKey = configManager.getApiKeyFor(plan);
-  const isLocalProvider = plan === 'lmstudio';
-  const keyMsg = existingKey
-    ? `API key for ${planLabel(plan)} [current: ${maskApiKey(existingKey)}]${isLocalProvider ? ' [optional]' : ''}:`
-    : `API key for ${planLabel(plan)}${isLocalProvider ? ' [optional]' : ''}:`;
-
-  const { apiKey } = await inquirer.prompt<{ apiKey: string }>([
-    {
-      type: 'password',
-      name: 'apiKey',
-      message: keyMsg,
-      mask: '*',
-      validate: (v: string) => {
-        if (v.trim().toLowerCase() === 'b') return true;
-        if (existingKey && v.trim().length === 0) return true;
-        if (isLocalProvider && v.trim().length === 0) return true;
-        return v.trim().length > 0 || 'API key cannot be empty';
-      },
-    },
-  ]);
-
-  if (apiKey.trim().toLowerCase() === 'b') return providerSetupFlow(plan);
-  const finalKey = apiKey.trim() || (existingKey ?? (isLocalProvider ? 'lmstudio' : ''));
-
-  if (plan === 'alibaba' && finalKey.startsWith('sk-sp-')) {
-    openAiBaseUrl = 'https://coding-intl.dashscope.aliyuncs.com/v1';
-    openAiModel = 'qwen3-coder-plus';
-    anthropicBaseUrl = 'https://coding-intl.dashscope.aliyuncs.com/apps/anthropic';
-    anthropicModel = 'qwen3-coder-plus';
-    configManager.setProviderProfile(plan, {
-      base_url: openAiBaseUrl,
-      model: openAiModel,
-      max_context_size: maxContextSize,
-      anthropic_base_url: anthropicBaseUrl,
-      anthropic_model: anthropicModel,
-    });
-    printInfo('Detected Alibaba Coding Plan key (sk-sp-*). Applied Coding Plan endpoints automatically.');
-  }
-  if (plan === 'alibaba_api') {
-    if (finalKey.startsWith('sk-sp-')) {
-      printWarning(
-        'Detected a Coding Plan key (sk-sp-*) under Alibaba API profile.',
-        'Use "Alibaba Coding Plan (Monthly)" profile for best compatibility.'
-      );
-    }
-    if (!openAiBaseUrl || !openAiBaseUrl.includes('dashscope-intl.aliyuncs.com')) {
-      openAiBaseUrl = 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1';
-      configManager.setProviderProfile(plan, {
-        base_url: openAiBaseUrl,
-        model: openAiModel || 'qwen3-max-2026-01-23',
-        max_context_size: maxContextSize,
-      });
-      printInfo('Applied Alibaba API Singapore endpoint as default.');
-    }
-  }
-
   configManager.setApiKeyFor(plan, finalKey);
 
-  printSuccess(`${planLabel(plan)} profile updated`);
-  const s = configManager.getProviderSettings(plan);
-  console.log(chalk.gray(`  OpenAI Endpoint   : ${s.baseUrl}`));
-  console.log(chalk.gray(`  OpenAI Model      : ${s.model}`));
-  if (supportsAnthropicProtocol(plan)) {
-    if (s.anthropicBaseUrl) console.log(chalk.gray(`  Anthropic Endpoint: ${s.anthropicBaseUrl}`));
-    if (s.anthropicModel) console.log(chalk.gray(`  Anthropic Model   : ${s.anthropicModel}`));
-  }
-  console.log(chalk.gray(`  API Key           : ${maskApiKey(finalKey)}`));
+  printSuccess(`${planLabel(plan)} profile saved`);
 }
 
 async function testOpenAiProtocol(plan: Plan): Promise<void> {
@@ -614,8 +507,9 @@ async function testProviderApisFlow(defaultPlan?: Plan): Promise<void> {
 }
 
 export async function providerMenu(): Promise<void> {
+  let first=true;
   while (true) {
-    console.clear();
+    if(first){console.clear();first=false;}
     printHeader('Provider Setup');
     const auth = configManager.getAuth();
     const plan = auth.plan as Plan | undefined;
@@ -631,12 +525,12 @@ export async function providerMenu(): Promise<void> {
       console.log();
     }
 
-    type Action = 'set_global' | 'configure' | 'test' | 'availability' | 'revoke';
+    type Action = 'configure' | 'set_global' | 'test' | 'availability' | 'revoke';
     const choices: Array<{ name: string; value: Action }> = [
-      { name: '1) Choose Default Provider', value: 'set_global' },
-      { name: '2) Configure Provider Profile (Quick/Advanced)', value: 'configure' },
+      { name: '1) Configure Built-in Provider Profiles (endpoint/model/API key)', value: 'configure' },
+      { name: '2) Choose Default Provider', value: 'set_global' },
       { name: '3) Test Provider APIs (OpenAI/Anthropic)', value: 'test' },
-      { name: '4) Manage Visible Providers', value: 'availability' },
+      { name: '4) Show/Hide Providers in Menus', value: 'availability' },
       { name: '5) Revoke Saved API Keys', value: 'revoke' },
     ];
 

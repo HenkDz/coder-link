@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
 import yaml from 'js-yaml';
+import { normalizeProviderModel } from '../lib/provider-registry.js';
 
 export const CONFIG_DIR = join(homedir(), '.coder-link');
 export const CONFIG_FILE = join(CONFIG_DIR, 'config.yaml');
@@ -17,7 +18,8 @@ export type Plan =
   | 'lmstudio'
   | 'alibaba'
   | 'alibaba_api'
-  | 'zenmux';
+  | 'zenmux'
+  | 'xiaomi';
 export type ToolId =
   | 'claude-code'
   | 'opencode'
@@ -40,6 +42,7 @@ export const ALL_PROVIDER_PLANS: Plan[] = [
   'alibaba',
   'alibaba_api',
   'zenmux',
+  'xiaomi',
 ];
 
 export const ALL_TOOL_IDS: ToolId[] = [
@@ -63,6 +66,7 @@ export const KIMI_LIKE_PLANS: ReadonlySet<string> = new Set([
   'alibaba',
   'alibaba_api',
   'zenmux',
+  'xiaomi',
 ]);
 
 export type OpenAICompatiblePlan = Exclude<Plan, 'glm_coding_plan_global' | 'glm_coding_plan_china'>;
@@ -121,11 +125,9 @@ export interface Config {
     alibaba?: ProviderConfig;
     alibaba_api?: ProviderConfig;
     zenmux?: ProviderConfig;
+    xiaomi?: ProviderConfig;
   };
 }
-
-/** @deprecated Use Plan type directly */
-export type KimiSource = 'moonshot' | 'openrouter' | 'nvidia' | 'custom';
 
 export interface ProviderSettings {
   baseUrl: string;
@@ -136,9 +138,6 @@ export interface ProviderSettings {
   source: string;
   maxContextSize?: number;
 }
-
-/** @deprecated Use ProviderSettings instead */
-export type KimiToolSettings = ProviderSettings;
 
 export class ConfigManager {
   private static instance: ConfigManager | null = null;
@@ -646,6 +645,14 @@ export class ConfigManager {
       anthropicModel: 'volcengine/doubao-seed-2.0-code',
       source: 'zenmux',
       maxContextSize: 256000,
+    },
+    xiaomi: {
+      baseUrl: 'https://token-plan-sgp.xiaomimimo.com/v1',
+      anthropicBaseUrl: 'https://token-plan-sgp.xiaomimimo.com/anthropic',
+      model: 'mimo-v2.5-pro',
+      anthropicModel: 'mimo-v2.5-pro',
+      source: 'xiaomi-token-plan-sgp',
+      maxContextSize: 128000,
     }
   };
 
@@ -669,17 +676,12 @@ export class ConfigManager {
     return {
       baseUrl: (prov?.base_url ?? defaults.baseUrl).trim(),
       anthropicBaseUrl: (prov?.anthropic_base_url ?? defaults.anthropicBaseUrl)?.trim(),
-      model: prov?.model || defaults.model,
-      anthropicModel: prov?.anthropic_model || defaults.anthropicModel,
+      model: normalizeProviderModel(activePlan as Plan, prov?.model || defaults.model),
+      anthropicModel: normalizeProviderModel(activePlan as Plan, prov?.anthropic_model || defaults.anthropicModel),
       providerId: prov?.provider_id || undefined,
       source: defaults.source,
       maxContextSize: prov?.max_context_size ?? defaults.maxContextSize,
     };
-  }
-
-  /** @deprecated Use getProviderSettings instead */
-  getKimiSettings(tool?: string): ProviderSettings {
-    return this.getProviderSettings(this.config.plan || 'kimi');
   }
 
   setProviderProfile(
@@ -710,16 +712,6 @@ export class ConfigManager {
       };
     }
     this.save();
-  }
-
-  /** @deprecated Use setProviderProfile instead */
-  setKimiProfile(profile: { source?: KimiSource; base_url?: string; models?: any; provider_id?: string }): void {
-    const plan = (profile.source === 'openrouter' || profile.source === 'nvidia') ? profile.source : 'kimi';
-    this.setProviderProfile(plan as any, {
-      base_url: profile.base_url,
-      model: profile.models?.default,
-      provider_id: profile.provider_id
-    });
   }
 
   getFactoryApiKey(): string | undefined {
@@ -798,6 +790,7 @@ export class ConfigManager {
     if (this.config.providers?.alibaba) delete this.config.providers.alibaba.api_key;
     if (this.config.providers?.alibaba_api) delete this.config.providers.alibaba_api.api_key;
     if (this.config.providers?.zenmux) delete this.config.providers.zenmux.api_key;
+    if (this.config.providers?.xiaomi) delete this.config.providers.xiaomi.api_key;
     this.save();
   }
 

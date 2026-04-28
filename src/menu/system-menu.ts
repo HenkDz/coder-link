@@ -64,8 +64,9 @@ export async function logsMenu(): Promise<void> {
   const LOG_DIR = join(CONFIG_DIR, 'logs');
   const LOG_FILE = join(LOG_DIR, 'error.log');
 
+  let first=true;
   while (true) {
-    console.clear();
+    if(first){console.clear();first=false;}
     printHeader('Error Logs');
 
     if (!existsSync(LOG_FILE)) {
